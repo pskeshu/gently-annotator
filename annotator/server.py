@@ -22,8 +22,10 @@ from fastapi.staticfiles import StaticFiles
 
 from .annotations import AnnotationStore
 from .catalog import Catalog
+from .prebake import PreBakeManager
 from .routes import annotations as annotations_routes
 from .routes import catalog as catalog_routes
+from .routes import prebake as prebake_routes
 from .routes import volume as volume_routes
 
 logger = logging.getLogger(__name__)
@@ -82,6 +84,19 @@ async def lifespan(app: FastAPI):
     app.state.volume_cache = OrderedDict()
     app.state.volume_cache_max = cfg.get("cache", {}).get("max_volumes", 8)
 
+    cache_root = Path(cfg.get("cache_root", ROOT / "preview_cache"))
+    cache_root.mkdir(parents=True, exist_ok=True)
+    app.state.cache_root = cache_root
+    logger.info("Preview sidecar cache root: %s", cache_root)
+
+    voxel_size = cfg.get("voxel_size_um", [1.0, 0.1625, 0.1625])
+    max_workers = int(cfg.get("prebake", {}).get("max_workers", 4))
+    app.state.prebake = PreBakeManager(
+        cache_root=cache_root,
+        voxel_size_um=voxel_size,
+        max_workers=max_workers,
+    )
+
     # Fire-and-forget background scan. The first /api/sessions call will
     # piggyback on the same in-progress cache entry once filled.
     prewarm_task = asyncio.create_task(_prewarm_summaries(app))
@@ -90,6 +105,7 @@ async def lifespan(app: FastAPI):
 
     if not prewarm_task.done():
         prewarm_task.cancel()
+    app.state.prebake.shutdown()
 
 
 def create_app(config_path: Path = DEFAULT_CONFIG) -> FastAPI:
@@ -100,6 +116,7 @@ def create_app(config_path: Path = DEFAULT_CONFIG) -> FastAPI:
     app.include_router(catalog_routes.router)
     app.include_router(volume_routes.router)
     app.include_router(annotations_routes.router)
+    app.include_router(prebake_routes.router)
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 

@@ -97,6 +97,31 @@ const API = {
     return r.json();
   },
 
+  // ---- prebake ----
+
+  async prebakeStart(dataset, session, embryo) {
+    const r = await fetch("/api/prebake/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dataset, session, embryo }),
+    });
+    if (!r.ok) throw new Error(`prebakeStart: ${r.status}`);
+    return r.json();
+  },
+
+  async prebakeStatus(dataset, session, embryo) {
+    const url = `/api/prebake/status?dataset=${encodeURIComponent(dataset)}&session=${encodeURIComponent(session)}&embryo=${encodeURIComponent(embryo)}`;
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`prebakeStatus: ${r.status}`);
+    return r.json();
+  },
+
+  async prebakeCancel() {
+    const r = await fetch("/api/prebake/cancel", { method: "POST" });
+    if (!r.ok) throw new Error(`prebakeCancel: ${r.status}`);
+    return r.json();
+  },
+
   async upsertFlag(dataset, session, embryo, { annotator, excluded, notes = null }) {
     const r = await fetch(`${this._annPath(dataset, session, embryo)}/flag`, {
       method: "POST",

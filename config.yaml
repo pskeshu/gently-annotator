@@ -29,6 +29,14 @@ stages:
 # pixel / 40x SPIM objective = 0.1625 um in XY.
 voxel_size_um: [1.0, 0.1625, 0.1625]
 
-# In-memory LRU cache of normalized uint8 volumes (each ~50 MB for v1).
+# In-memory LRU cache of normalized uint8 volumes (each ~26 MB after preprocess).
 cache:
   max_volumes: 8
+
+# On-disk cache of preprocessed sidecars. ~26 MB per timepoint, ~5 GB per
+# fully-baked embryo. First-time fetches write here; later fetches mmap.
+cache_root: D:\Kesavan\gently_annotator_cache
+
+# Background pre-bake of all timepoints when an embryo is selected.
+prebake:
+  max_workers: 4

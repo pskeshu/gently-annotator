@@ -89,10 +89,24 @@ def preprocess(
     return out
 
 
+def _stride_percentile(vol: np.ndarray, q: tuple[float, float], target_n: int = 100_000) -> np.ndarray:
+    """Estimate np.percentile on a strided sample of the volume.
+
+    For a 50x512x1024 = 26M-voxel volume, full np.percentile takes ~150-200 ms.
+    Striding to ~100 k voxels takes <5 ms with negligible accuracy loss for
+    1st/99th percentiles on a roughly uniform background+signal distribution.
+    Sampling is deterministic (no RNG) so identical inputs always produce
+    identical sidecars.
+    """
+    flat = vol.reshape(-1)
+    stride = max(1, flat.size // target_n)
+    return np.percentile(flat[::stride], list(q))
+
+
 def normalize_for_3d(vol: np.ndarray, z_blur_sigma: float = 1.0) -> np.ndarray:
     """Percentile-stretch + Z-axis Gaussian blur + uint8 quantize."""
     vol = vol.astype(np.float32)
-    p1, p99 = np.percentile(vol, [1, 99])
+    p1, p99 = _stride_percentile(vol, (1.0, 99.0))
     vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
     vol = ndimage.gaussian_filter1d(vol, sigma=z_blur_sigma, axis=0)
     return (vol * 255).astype(np.uint8)

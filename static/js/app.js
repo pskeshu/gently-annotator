@@ -50,6 +50,11 @@
     volumeCache: new Map(),
     volumeCacheMax: 6,
     prefetchInFlight: new Map(),  // key → AbortController
+    // Pre-bake state for the currently selected embryo. Polled while the
+    // server bakes sidecars in a process pool; once `running` flips to
+    // false (and total>0), every fetch hits disk in ~80 ms.
+    prebake: { dataset: null, session: null, embryo: null, total: 0, done: 0, errors: 0, alreadyComplete: 0, running: false },
+    prebakePollTimer: null,
   };
 
   function volumeKey(ds, ss, em, tp) {
@@ -467,6 +472,26 @@
       if (summary?.excluded) {
         badges.push(`<span class="cat-badge bad" title="excluded">✕</span>`);
       }
+      // Pre-bake progress badge — only on the currently selected embryo.
+      if (
+        isSelected &&
+        state.prebake.embryo === em.embryo_id &&
+        state.prebake.session === sid &&
+        state.prebake.dataset === dsKey &&
+        state.prebake.total > 0
+      ) {
+        const baked = state.prebake.alreadyComplete + state.prebake.done;
+        const totalAll = state.prebake.alreadyComplete + state.prebake.total;
+        const pct = totalAll > 0 ? Math.round((baked / totalAll) * 100) : 0;
+        const cls = state.prebake.running ? "bake running" : "bake done";
+        const label = state.prebake.running
+          ? `⏳ ${baked}/${totalAll}`
+          : `✓ baked`;
+        const title = state.prebake.running
+          ? `Pre-baking previews: ${baked} of ${totalAll} (${pct}%)`
+          : `All ${totalAll} previews baked.`;
+        badges.push(`<span class="cat-badge ${cls}" title="${title}">${label}</span>`);
+      }
 
       row.innerHTML =
         `<span class="cat-label">${em.embryo_id}</span>` +
@@ -482,6 +507,7 @@
   async function selectEmbryo(dataset, session, embryo) {
     flushNoteSave();  // commit any pending note for the previous embryo
     cancelPrefetches();
+    stopPrebakePolling();
     state.volumeCache.clear();   // different embryo → different volumes
     state.selected = { dataset, session, embryo, timepoint: null };
     state.annotations = {
@@ -504,11 +530,61 @@
       }
       // Annotations and first volume in parallel — neither blocks the other.
       const annotPromise = loadAnnotations();
+      const prebakePromise = startPrebake(dataset, session, embryo);
       await loadTimepoint(state.timepoints[0]);
       await annotPromise;
+      await prebakePromise;
     } catch (err) {
       setStatus("Embryo load failed:\n" + err.message, true);
     }
+  }
+
+  // ---- pre-bake ----
+
+  async function startPrebake(dataset, session, embryo) {
+    try {
+      const status = await API.prebakeStart(dataset, session, embryo);
+      applyPrebakeStatus(dataset, session, embryo, status);
+      if (status.total > 0 && status.running) {
+        startPrebakePolling();
+      }
+    } catch (err) {
+      console.warn("prebake start failed:", err.message);
+    }
+  }
+
+  function startPrebakePolling() {
+    stopPrebakePolling();
+    state.prebakePollTimer = setInterval(async () => {
+      const { dataset, session, embryo } = state.selected;
+      if (!dataset || !embryo) { stopPrebakePolling(); return; }
+      try {
+        const status = await API.prebakeStatus(dataset, session, embryo);
+        applyPrebakeStatus(dataset, session, embryo, status);
+        if (!status.running) stopPrebakePolling();
+      } catch (err) {
+        console.warn("prebake status poll failed:", err.message);
+      }
+    }, 1500);
+  }
+
+  function stopPrebakePolling() {
+    if (state.prebakePollTimer) {
+      clearInterval(state.prebakePollTimer);
+      state.prebakePollTimer = null;
+    }
+  }
+
+  function applyPrebakeStatus(dataset, session, embryo, s) {
+    state.prebake = {
+      dataset, session, embryo,
+      total: s.total || 0,
+      done: s.done || 0,
+      errors: s.errors || 0,
+      alreadyComplete: s.already_complete || 0,
+      running: !!s.running,
+    };
+    renderCatalog();   // sidebar progress badge
   }
 
   async function loadAnnotations() {

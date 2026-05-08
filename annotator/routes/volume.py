@@ -10,10 +10,17 @@ the parse step — visible improvement in scrubbing latency.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
+from ..preview_cache import (
+    cache_path_for,
+    is_complete as sidecar_is_complete,
+    read_sidecar,
+    write_sidecar,
+)
 from ..volume_io import load_volume, normalize_for_3d, preprocess
 
 logger = logging.getLogger(__name__)
@@ -43,22 +50,46 @@ async def get_volume_raw(
         cache.move_to_end(cache_key)
         cached = cache[cache_key]
     else:
-        try:
-            vol = load_volume(path)
-            vol = preprocess(vol)
-            vol_uint8 = normalize_for_3d(vol)
-        except FileNotFoundError as exc:
-            raise HTTPException(status_code=404, detail=str(exc))
-        except Exception as exc:
-            logger.exception("Failed to load volume %s", path)
-            raise HTTPException(status_code=500, detail=f"Failed to load volume: {exc}")
+        cache_root = Path(cfg.get("cache_root", "preview_cache"))
+        sidecar = cache_path_for(cache_root, dataset, session, embryo, timepoint)
+        cached = None
 
-        voxel_size = cfg.get("voxel_size_um", [1.0, 0.1625, 0.1625])
-        cached = {
-            "shape": list(vol_uint8.shape),
-            "voxel_size_um": voxel_size,
-            "bytes": vol_uint8.tobytes(),
-        }
+        # Try the disk cache first — orders of magnitude faster than
+        # re-running the full preprocess pipeline.
+        if sidecar_is_complete(sidecar):
+            try:
+                body, shape, voxel_size = read_sidecar(sidecar)
+                cached = {
+                    "shape": shape,
+                    "voxel_size_um": voxel_size,
+                    "bytes": body,
+                }
+            except Exception as exc:
+                logger.warning("Bad sidecar %s, will regenerate: %s", sidecar, exc)
+                cached = None
+
+        if cached is None:
+            try:
+                vol = load_volume(path)
+                vol = preprocess(vol)
+                vol_uint8 = normalize_for_3d(vol)
+            except FileNotFoundError as exc:
+                raise HTTPException(status_code=404, detail=str(exc))
+            except Exception as exc:
+                logger.exception("Failed to load volume %s", path)
+                raise HTTPException(status_code=500, detail=f"Failed to load volume: {exc}")
+
+            voxel_size = cfg.get("voxel_size_um", [1.0, 0.1625, 0.1625])
+            cached = {
+                "shape": list(vol_uint8.shape),
+                "voxel_size_um": voxel_size,
+                "bytes": vol_uint8.tobytes(),
+            }
+            try:
+                write_sidecar(sidecar, vol_uint8, voxel_size)
+            except OSError as exc:
+                logger.warning("Could not write sidecar %s: %s", sidecar, exc)
+
         cache[cache_key] = cached
         while len(cache) > cache_max:
             cache.popitem(last=False)
