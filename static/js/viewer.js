@@ -345,13 +345,13 @@
       // an empty gizmo box shows the camera frame.
       this._gizmoArrows.add(this._makeRefAxes());
 
-      if (ap) this._gizmoArrows.add(this._makeAxisArrow(ap, "#ff5577", "A"));
-      if (dv) this._gizmoArrows.add(this._makeAxisArrow(dv, "#56d364", "D"));
+      if (ap) this._gizmoArrows.add(this._makeAxisArrow(ap, "#ff5577", "A", "P"));
+      if (dv) this._gizmoArrows.add(this._makeAxisArrow(dv, "#56d364", "D", "V"));
       if (ap && dv) {
         const apV = new THREE.Vector3(...ap);
         const dvV = new THREE.Vector3(...dv);
         const lr = new THREE.Vector3().crossVectors(apV, dvV).normalize();
-        this._gizmoArrows.add(this._makeAxisArrow([lr.x, lr.y, lr.z], "#79c0ff", "L"));
+        this._gizmoArrows.add(this._makeAxisArrow([lr.x, lr.y, lr.z], "#79c0ff", "L", "R"));
       }
       this._gizmoArrows.visible = !!this._axesVisible;
     }
@@ -379,29 +379,79 @@
       return g;
     }
 
-    _makeAxisArrow(dir, color, label) {
+    /** Bidirectional axis: shaft from -dir*ARROW_LEN to +dir*ARROW_LEN with a
+     *  cone tip at the +end, plus camera-facing text labels at each pole.
+     *  posLabel goes at +dir, negLabel at -dir. */
+    _makeAxisArrow(dir, color, posLabel, negLabel) {
       const g = new THREE.Group();
-      // Gizmo coords: arrow length ~0.95 fits the gizmo viewport nicely.
-      const ARROW_LEN = 0.9;
-      const TIP_LEN = 0.18;
-      const TIP_RADIUS = 0.07;
+      const ARROW_LEN = 0.85;
+      const TIP_LEN = 0.16;
+      const TIP_RADIUS = 0.06;
+      const LABEL_OFFSET = 0.18;
       const v = new THREE.Vector3(...dir).normalize();
+      const negV = v.clone().negate();
 
+      // Shaft spans both poles so the user sees the full axis, not just
+      // the anterior half. Stops short of the +tip to make room for the cone.
       const shaftGeo = new THREE.BufferGeometry().setFromPoints([
-        new THREE.Vector3(0, 0, 0),
+        negV.clone().multiplyScalar(ARROW_LEN),
         v.clone().multiplyScalar(ARROW_LEN - TIP_LEN),
       ]);
-      const shaftMat = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
+      const shaftMat = new THREE.LineBasicMaterial({
+        color, depthTest: false, transparent: true, opacity: 0.9,
+      });
       g.add(new THREE.Line(shaftGeo, shaftMat));
 
+      // Cone marks the +dir pole so the axis has an unambiguous direction.
       const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 14);
-      const coneMat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
+      const coneMat = new THREE.MeshBasicMaterial({
+        color, depthTest: false, transparent: true, opacity: 0.95,
+      });
       const cone = new THREE.Mesh(coneGeo, coneMat);
       cone.position.copy(v).multiplyScalar(ARROW_LEN - TIP_LEN / 2);
       cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
       g.add(cone);
-      g.userData.label = label;
+
+      // Sprite labels — always face the gizmo camera regardless of how the
+      // user has rotated the volume. Black stroke makes them readable on
+      // both light and dark backgrounds.
+      if (posLabel) {
+        const sp = this._makeTextSprite(posLabel, color);
+        sp.position.copy(v).multiplyScalar(ARROW_LEN + LABEL_OFFSET);
+        g.add(sp);
+      }
+      if (negLabel) {
+        const sp = this._makeTextSprite(negLabel, color);
+        sp.position.copy(negV).multiplyScalar(ARROW_LEN + LABEL_OFFSET);
+        g.add(sp);
+      }
       return g;
+    }
+
+    _makeTextSprite(text, color) {
+      const SIZE = 96;
+      const canvas = document.createElement("canvas");
+      canvas.width = SIZE;
+      canvas.height = SIZE;
+      const ctx = canvas.getContext("2d");
+      ctx.font = "bold 64px ui-monospace, Menlo, monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      // Black halo for legibility against either dark scene or bright fill.
+      ctx.lineWidth = 8;
+      ctx.strokeStyle = "rgba(0, 0, 0, 0.9)";
+      ctx.strokeText(text, SIZE / 2, SIZE / 2);
+      ctx.fillStyle = color;
+      ctx.fillText(text, SIZE / 2, SIZE / 2);
+      const tex = new THREE.CanvasTexture(canvas);
+      tex.minFilter = THREE.LinearFilter;
+      tex.magFilter = THREE.LinearFilter;
+      const mat = new THREE.SpriteMaterial({
+        map: tex, transparent: true, depthTest: false, sizeAttenuation: true,
+      });
+      const sprite = new THREE.Sprite(mat);
+      sprite.scale.set(0.3, 0.3, 1);
+      return sprite;
     }
 
     resetView() {
