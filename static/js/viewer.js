@@ -473,7 +473,7 @@
         }
         const SIZE = Math.min(110, Math.max(70, Math.floor(Math.min(w, h) * 0.16)));
         const MARGIN = 12;
-        const gx = w - SIZE - MARGIN;
+        const gx = MARGIN;            // bottom-left
         const gy = MARGIN;  // y is from bottom-left in WebGL viewport coords
         this.renderer.setViewport(gx, gy, SIZE, SIZE);
         this.renderer.setScissor(gx, gy, SIZE, SIZE);
