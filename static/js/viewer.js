@@ -143,7 +143,13 @@
       this._cameraObjectPos = null;
       this._resizeObserver = null;
       this._mounted = false;
-      this._axisGroup = null;
+
+      // Orientation gizmo lives in a separate scene/camera so it can be
+      // rendered as a small corner inset rather than overlaid on the volume.
+      this._gizmoScene = null;
+      this._gizmoCamera = null;
+      this._gizmoGroup = null;     // rotates/flips like volumeGroup each frame
+      this._gizmoArrows = null;    // sub-group holding the actual arrow meshes
       this._axesVisible = true;
     }
 
@@ -177,11 +183,24 @@
       this.volumeGroup.scale.y = -1;
       this.scene.add(this.volumeGroup);
 
+      // Tiny separate scene for the AP/DV/LR axis gizmo. Rendered after the
+      // main scene as an overlay viewport in the bottom-right corner. Same
+      // rotation/scale as volumeGroup so the axes track the user's view.
+      this._gizmoScene = new THREE.Scene();
+      this._gizmoCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 10);
+      this._gizmoCamera.position.z = 2.5;
+      this._gizmoGroup = new THREE.Group();
+      this._gizmoArrows = new THREE.Group();
+      this._gizmoGroup.add(this._gizmoArrows);
+      this._gizmoScene.add(this._gizmoGroup);
+
       this._cameraObjectPos = new THREE.Vector3();
       this._installInteractions();
       this._installResize();
       this._startRenderLoop();
       this._mounted = true;
+      // Show the empty reference axes from the start.
+      this.setOrientationAxes({ ap: null, dv: null });
       return true;
     }
 
@@ -296,65 +315,75 @@
     }
 
     /** Replace the orientation axis gizmo. ap/dv are unit-vector arrays in
-     *  volume-local coords, or null. Children of volumeGroup so they rotate
-     *  with the volume. */
+     *  volume-local coords, or null. The arrows live in a separate
+     *  gizmo scene (rendered as a small corner overlay) — NOT overlaid on
+     *  the volume itself. The gizmo group's rotation is synced to the
+     *  volumeGroup each animate frame so the axes track the user's view. */
     setOrientationAxes({ ap, dv }) {
-      if (!this.volumeGroup) return;
-      if (this._axisGroup) {
-        this.volumeGroup.remove(this._axisGroup);
-        this._axisGroup.traverse((o) => {
-          o.geometry?.dispose();
-          o.material?.dispose();
-        });
+      if (!this._gizmoArrows) return;
+      while (this._gizmoArrows.children.length) {
+        const c = this._gizmoArrows.children[0];
+        c.traverse?.((o) => { o.geometry?.dispose(); o.material?.dispose(); });
+        this._gizmoArrows.remove(c);
       }
-      this._axisGroup = new THREE.Group();
-      this._axisGroup.renderOrder = 999;  // drawn after the volume
+      // Three short reference axes (gray, length 1) for context — so even
+      // an empty gizmo box shows the camera frame.
+      this._gizmoArrows.add(this._makeRefAxes());
 
-      // The volume cube fits inside a unit sphere (max half-extent = 0.5),
-      // so an arrow length of ~0.7 protrudes clearly past the volume.
-      const ARROW_LEN = 0.7;
-      if (ap) this._axisGroup.add(this._makeAxisArrow(ap, "#ff5577", "A"));
-      if (dv) this._axisGroup.add(this._makeAxisArrow(dv, "#56d364", "D"));
-      // LR derived only when both AP and DV are known.
+      if (ap) this._gizmoArrows.add(this._makeAxisArrow(ap, "#ff5577", "A"));
+      if (dv) this._gizmoArrows.add(this._makeAxisArrow(dv, "#56d364", "D"));
       if (ap && dv) {
         const apV = new THREE.Vector3(...ap);
         const dvV = new THREE.Vector3(...dv);
         const lr = new THREE.Vector3().crossVectors(apV, dvV).normalize();
-        this._axisGroup.add(
-          this._makeAxisArrow([lr.x, lr.y, lr.z], "#79c0ff", "L")
-        );
+        this._gizmoArrows.add(this._makeAxisArrow([lr.x, lr.y, lr.z], "#79c0ff", "L"));
       }
-      this.volumeGroup.add(this._axisGroup);
-      this._axisGroup.visible = !!this._axesVisible;
+      this._gizmoArrows.visible = !!this._axesVisible;
     }
 
     setAxesVisible(v) {
       this._axesVisible = !!v;
-      if (this._axisGroup) this._axisGroup.visible = this._axesVisible;
+      if (this._gizmoArrows) this._gizmoArrows.visible = this._axesVisible;
+    }
+
+    /** A faint world-axes reference (X red-ish, Y green-ish, Z blue-ish)
+     *  shown inside the gizmo so even an empty embryo has a frame to read. */
+    _makeRefAxes() {
+      const g = new THREE.Group();
+      const len = 0.95;
+      const refMat = (c) => new THREE.LineBasicMaterial({
+        color: c, transparent: true, opacity: 0.18, depthTest: false,
+      });
+      const seg = (a, b, mat) => {
+        const geo = new THREE.BufferGeometry().setFromPoints([a, b]);
+        return new THREE.Line(geo, mat);
+      };
+      g.add(seg(new THREE.Vector3(-len, 0, 0), new THREE.Vector3(len, 0, 0), refMat(0x888888)));
+      g.add(seg(new THREE.Vector3(0, -len, 0), new THREE.Vector3(0, len, 0), refMat(0x888888)));
+      g.add(seg(new THREE.Vector3(0, 0, -len), new THREE.Vector3(0, 0, len), refMat(0x888888)));
+      return g;
     }
 
     _makeAxisArrow(dir, color, label) {
       const g = new THREE.Group();
-      const ARROW_LEN = 0.7;
-      const TIP_LEN = 0.08;
-      const TIP_RADIUS = 0.03;
+      // Gizmo coords: arrow length ~0.95 fits the gizmo viewport nicely.
+      const ARROW_LEN = 0.9;
+      const TIP_LEN = 0.18;
+      const TIP_RADIUS = 0.07;
       const v = new THREE.Vector3(...dir).normalize();
-      // Shaft: line from origin → ARROW_LEN*v
+
       const shaftGeo = new THREE.BufferGeometry().setFromPoints([
         new THREE.Vector3(0, 0, 0),
         v.clone().multiplyScalar(ARROW_LEN - TIP_LEN),
       ]);
-      const shaftMat = new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: false, transparent: true, opacity: 0.95 });
+      const shaftMat = new THREE.LineBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
       g.add(new THREE.Line(shaftGeo, shaftMat));
 
-      // Tip: cone pointing along v at the end of the shaft.
-      const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 12);
+      const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 14);
       const coneMat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
       const cone = new THREE.Mesh(coneGeo, coneMat);
       cone.position.copy(v).multiplyScalar(ARROW_LEN - TIP_LEN / 2);
-      // Three.js cones point along +Y by default; rotate so the +Y axis aligns with v.
-      const yAxis = new THREE.Vector3(0, 1, 0);
-      cone.quaternion.setFromUnitVectors(yAxis, v);
+      cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
       g.add(cone);
       g.userData.label = label;
       return g;
@@ -422,19 +451,38 @@
       const animate = () => {
         this.animationId = requestAnimationFrame(animate);
         if (this.volumeMesh && this.volumeMaterial) {
-          // Force the matrix update before reading worldToLocal. Three.js
-          // only updates matrixWorld during render(), so on the first frame
-          // after a fresh mesh swap the worldToLocal would use an identity
-          // matrix and the uniform would briefly point at the un-rotated
-          // camera position — causing a 1-frame "camera reset" flicker.
           this.volumeMesh.updateMatrixWorld(true);
-          // Camera position in the volume cube's local space (accounts
-          // for the volumeGroup's rotation AND the Y scale flip).
           this._cameraObjectPos.copy(this.camera.position);
           this.volumeMesh.worldToLocal(this._cameraObjectPos);
           this.volumeMaterial.uniforms.uCameraObjectPos.value.copy(this._cameraObjectPos);
         }
+        // Main scene: full canvas viewport, full clear.
+        const w = this.container.clientWidth || 1;
+        const h = this.container.clientHeight || 1;
+        this.renderer.setViewport(0, 0, w, h);
+        this.renderer.setScissor(0, 0, w, h);
+        this.renderer.setScissorTest(false);
+        this.renderer.autoClear = true;
         this.renderer.render(this.scene, this.camera);
+
+        // Gizmo overlay: small bottom-right inset. Sync rotation to the
+        // volumeGroup each frame so the axes track the user's view.
+        if (this._gizmoGroup && this.volumeGroup) {
+          this._gizmoGroup.quaternion.copy(this.volumeGroup.quaternion);
+          this._gizmoGroup.scale.copy(this.volumeGroup.scale);
+        }
+        const SIZE = Math.min(110, Math.max(70, Math.floor(Math.min(w, h) * 0.16)));
+        const MARGIN = 12;
+        const gx = w - SIZE - MARGIN;
+        const gy = MARGIN;  // y is from bottom-left in WebGL viewport coords
+        this.renderer.setViewport(gx, gy, SIZE, SIZE);
+        this.renderer.setScissor(gx, gy, SIZE, SIZE);
+        this.renderer.setScissorTest(true);
+        this.renderer.autoClear = false;
+        this.renderer.clearDepth();
+        this.renderer.render(this._gizmoScene, this._gizmoCamera);
+        this.renderer.setScissorTest(false);
+        this.renderer.autoClear = true;
       };
       animate();
     }
@@ -458,13 +506,16 @@
     dispose() {
       if (this.animationId) cancelAnimationFrame(this.animationId);
       this._disposeVolume();
-      if (this._axisGroup) {
-        this._axisGroup.traverse((o) => {
+      if (this._gizmoArrows) {
+        this._gizmoArrows.traverse((o) => {
           o.geometry?.dispose();
           o.material?.dispose();
         });
-        this._axisGroup = null;
+        this._gizmoArrows = null;
       }
+      this._gizmoGroup = null;
+      this._gizmoScene = null;
+      this._gizmoCamera = null;
       if (this._resizeObserver) this._resizeObserver.disconnect();
       if (this.renderer) {
         this.renderer.dispose();
