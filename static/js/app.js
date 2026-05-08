@@ -43,7 +43,18 @@
     annotationSummary: new Map(),
     noteSaveTimer: null,
     noteSaveInflight: false,
+    // Client-side LRU cache of fetched volumes — keyed by
+    // "dataset/session/embryo/tp" → {shape, voxel_size_um, data: Uint8Array}.
+    // Filled by both foreground loads and background prefetches; ~26 MB per
+    // entry so cap is conservative.
+    volumeCache: new Map(),
+    volumeCacheMax: 6,
+    prefetchInFlight: new Map(),  // key → AbortController
   };
+
+  function volumeKey(ds, ss, em, tp) {
+    return `${ds}/${ss}/${em}/${tp}`;
+  }
 
   function summaryKey(dataset, session, embryo) {
     return `${dataset}/${session}/${embryo}`;
@@ -470,6 +481,8 @@
 
   async function selectEmbryo(dataset, session, embryo) {
     flushNoteSave();  // commit any pending note for the previous embryo
+    cancelPrefetches();
+    state.volumeCache.clear();   // different embryo → different volumes
     state.selected = { dataset, session, embryo, timepoint: null };
     state.annotations = {
       loaded: false,
@@ -520,32 +533,114 @@
     renderAnnotationUI();
   }
 
+  /** Fetch a volume, returning from the client cache if possible. Foreground
+   *  call. Updates LRU on hit. */
+  async function fetchVolumeCached(ds, ss, em, tp) {
+    const key = volumeKey(ds, ss, em, tp);
+    const cached = state.volumeCache.get(key);
+    if (cached) {
+      // LRU: move to most-recently-used.
+      state.volumeCache.delete(key);
+      state.volumeCache.set(key, cached);
+      return { ...cached, fromCache: true };
+    }
+    // If a prefetch is already in flight for this key, await its result by
+    // polling the cache — simpler than wiring up a shared promise.
+    if (state.prefetchInFlight.has(key)) {
+      for (let i = 0; i < 200; i++) {  // up to ~10s
+        await new Promise((r) => setTimeout(r, 50));
+        const c = state.volumeCache.get(key);
+        if (c) {
+          state.volumeCache.delete(key);
+          state.volumeCache.set(key, c);
+          return { ...c, fromCache: true };
+        }
+        if (!state.prefetchInFlight.has(key)) break; // failed
+      }
+    }
+    const data = await API.volume(ds, ss, em, tp);
+    putInVolumeCache(key, data);
+    return { ...data, fromCache: false };
+  }
+
+  function putInVolumeCache(key, data) {
+    state.volumeCache.set(key, data);
+    while (state.volumeCache.size > state.volumeCacheMax) {
+      const oldest = state.volumeCache.keys().next().value;
+      state.volumeCache.delete(oldest);
+    }
+  }
+
+  /** Background prefetch of neighbor timepoints. Doesn't await; failures
+   *  are silently logged. */
+  function schedulePrefetch(ds, ss, em, tps, currentTp) {
+    if (!tps.length) return;
+    const idx = tps.indexOf(currentTp);
+    if (idx < 0) return;
+    // Order matters: nearest neighbors first (most likely next press).
+    const deltas = [1, -1, 2, -2];
+    for (const delta of deltas) {
+      const j = idx + delta;
+      if (j < 0 || j >= tps.length) continue;
+      const tp = tps[j];
+      const key = volumeKey(ds, ss, em, tp);
+      if (state.volumeCache.has(key)) continue;
+      if (state.prefetchInFlight.has(key)) continue;
+      const ctrl = new AbortController();
+      state.prefetchInFlight.set(key, ctrl);
+      API.volume(ds, ss, em, tp, { signal: ctrl.signal })
+        .then((data) => putInVolumeCache(key, data))
+        .catch((err) => {
+          if (err.name !== "AbortError") {
+            console.warn("prefetch failed for t=" + tp + ":", err.message);
+          }
+        })
+        .finally(() => {
+          state.prefetchInFlight.delete(key);
+        });
+    }
+  }
+
+  /** Cancel any in-flight prefetches — called when the user changes embryos. */
+  function cancelPrefetches() {
+    for (const ctrl of state.prefetchInFlight.values()) {
+      try { ctrl.abort(); } catch (_) {}
+    }
+    state.prefetchInFlight.clear();
+  }
+
   async function loadTimepoint(tp) {
     if (state.loadingVolume) return;
     flushNoteSave();  // commit any pending note for the previous timepoint
     state.loadingVolume = true;
     state.selected.timepoint = tp;
     updateTimepointReadout();
-    renderAnnotationUI();  // re-render to update note, stage highlight, cursor
-    setStatus(`Loading volume t=${tp}…\n(over network this can take 5–10 sec)`);
+    renderAnnotationUI();
+    const { dataset, session, embryo } = state.selected;
+    const cacheHit = state.volumeCache.has(volumeKey(dataset, session, embryo, tp));
+    if (!cacheHit) {
+      setStatus(`Loading volume t=${tp}…`);
+    }
 
     const t0 = performance.now();
     try {
-      const { dataset, session, embryo } = state.selected;
-      const data = await API.volume(dataset, session, embryo, tp);
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      const data = await fetchVolumeCached(dataset, session, embryo, tp);
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
       state.viewer.setVolume({
         data: data.data,
         shape: data.shape,
         voxelSizeUm: data.voxel_size_um,
       });
-      setStatus(`t=${tp} · shape ${data.shape.join("×")} · ${elapsed}s`);
-      setTimeout(() => clearStatus(), 1500);
+      const tag = data.fromCache ? "cached" : `${elapsed}s`;
+      setStatus(`t=${tp} · ${data.shape.join("×")} · ${tag}`);
+      setTimeout(() => clearStatus(), 900);
     } catch (err) {
       setStatus(`Volume t=${tp} failed:\n${err.message}`, true);
     } finally {
       state.loadingVolume = false;
     }
+    // Warm the neighbors. Idle CPU + bandwidth — non-blocking.
+    schedulePrefetch(dataset, session, embryo, state.timepoints, tp);
   }
 
   // ---- annotations: stage transitions ----

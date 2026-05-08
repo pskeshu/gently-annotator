@@ -27,11 +27,26 @@ const API = {
     return r.json();
   },
 
-  async volume(dataset, session, embryo, timepoint) {
+  /** Fetch a preprocessed uint8 volume as raw bytes. Shape + voxel size
+   *  arrive in response headers; payload is the bare voxel array. */
+  async volume(dataset, session, embryo, timepoint, { signal } = {}) {
     const url = `/api/datasets/${encodeURIComponent(dataset)}/sessions/${encodeURIComponent(session)}/embryos/${encodeURIComponent(embryo)}/volumes/${timepoint}`;
-    const r = await fetch(url);
+    const r = await fetch(url, { signal });
     if (!r.ok) throw new Error(`volume: ${r.status}`);
-    return r.json();
+    const buf = await r.arrayBuffer();
+    const shape = (r.headers.get("X-Volume-Shape") || "").split(",").map(Number);
+    const voxelSize = (r.headers.get("X-Volume-Voxel-Size-Um") || "1,1,1")
+      .split(",")
+      .map(Number);
+    return {
+      dataset,
+      session,
+      embryo,
+      timepoint,
+      shape,
+      voxel_size_um: voxelSize,
+      data: new Uint8Array(buf),
+    };
   },
 
   // ---- annotations ----
