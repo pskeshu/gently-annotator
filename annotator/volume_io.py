@@ -89,24 +89,45 @@ def preprocess(
     return out
 
 
-def _stride_percentile(vol: np.ndarray, q: tuple[float, float], target_n: int = 100_000) -> np.ndarray:
-    """Estimate np.percentile on a strided sample of the volume.
+def _signal_percentile(
+    vol: np.ndarray,
+    q: tuple[float, float],
+    target_n: int = 100_000,
+) -> np.ndarray:
+    """Estimate np.percentile over the volume's *signal* voxels — the ones
+    that survived the background-subtract step (i.e., > 0).
 
-    For a 50x512x1024 = 26M-voxel volume, full np.percentile takes ~150-200 ms.
-    Striding to ~100 k voxels takes <5 ms with negligible accuracy loss for
-    1st/99th percentiles on a roughly uniform background+signal distribution.
-    Sampling is deterministic (no RNG) so identical inputs always produce
-    identical sidecars.
+    The background subtraction in preprocess() clips below-pedestal voxels
+    to zero. Including those in the percentile computation drags p99 down
+    because they dominate the histogram (often >50% of voxels in dim
+    Gently2 timepoints), which compresses the dynamic range and makes
+    the remaining faint background noise stretch up into visibility.
+    Computing percentile only on non-zero voxels gives a stretch that
+    tracks the actual signal.
+
+    For Gently1 (dense signal) this matters very little; for Gently2
+    (sparse signal) it's the difference between a clean black background
+    and a noisy gray haze.
+
+    Strided sampling for speed: full np.percentile on 26M voxels is
+    ~150-200 ms; sampling to ~100k voxels is <5 ms. Sampling is
+    deterministic (no RNG) so identical inputs always produce identical
+    sidecars.
     """
     flat = vol.reshape(-1)
-    stride = max(1, flat.size // target_n)
-    return np.percentile(flat[::stride], list(q))
+    positive = flat[flat > 0]
+    # Degenerate case (volume is entirely background after subtract):
+    # return [0, 1] so we don't divide by zero downstream.
+    if positive.size < 100:
+        return np.array([0.0, 1.0], dtype=np.float64)
+    stride = max(1, positive.size // target_n)
+    return np.percentile(positive[::stride], list(q))
 
 
 def normalize_for_3d(vol: np.ndarray, z_blur_sigma: float = 1.0) -> np.ndarray:
     """Percentile-stretch + Z-axis Gaussian blur + uint8 quantize."""
     vol = vol.astype(np.float32)
-    p1, p99 = _stride_percentile(vol, (1.0, 99.0))
+    p1, p99 = _signal_percentile(vol, (1.0, 99.0))
     vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
     vol = ndimage.gaussian_filter1d(vol, sigma=z_blur_sigma, axis=0)
     return (vol * 255).astype(np.uint8)

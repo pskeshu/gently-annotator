@@ -30,7 +30,11 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 MAGIC = b"GAV1"
-VERSION = 1
+# Bump on every change to the preprocessing pipeline that changes the
+# voxel bytes — the volume route auto-regenerates sidecars whose VERSION
+# doesn't match. v2: signal-percentile (skip-zero) normalization in
+# volume_io.normalize_for_3d.
+VERSION = 2
 HEADER_FMT = "<4sIIII3fI"
 HEADER_SIZE = struct.calcsize(HEADER_FMT)
 assert HEADER_SIZE == 36
