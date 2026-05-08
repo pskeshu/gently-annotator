@@ -179,6 +179,16 @@
     document.getElementById("prev-tp").addEventListener("click", () => stepTimepoint(-1));
     document.getElementById("next-tp").addEventListener("click", () => stepTimepoint(1));
 
+    // Snap-to-axis buttons.
+    document.querySelectorAll(".snap-btn[data-snap]").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        if (state.viewer) state.viewer.snapView(btn.dataset.snap);
+      });
+    });
+    document.getElementById("snap-reset")?.addEventListener("click", () => {
+      if (state.viewer) state.viewer.resetView();
+    });
+
     // Notes textarea — auto-save on idle and on blur.
     const ta = document.getElementById("notes-textarea");
     ta.addEventListener("input", () => scheduleNoteSave());

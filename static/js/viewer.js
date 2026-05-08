@@ -132,7 +132,14 @@
       this.volumeMaterial = null;
       this.volumeTexture3D = null;
 
-      this.savedRotation = { x: -0.5, y: 0.5 };
+      // Accumulated rotation as a quaternion. Quaternion multiplication is
+      // commutative-free and avoids the gimbal lock you get from accumulating
+      // Euler angles. The default matches the old (rotation.x=-0.5, .y=0.5,
+      // order XYZ) so existing volumes look the same after the upgrade.
+      this.DEFAULT_QUATERNION = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(-0.5, 0.5, 0, "XYZ")
+      );
+      this.savedQuaternion = this.DEFAULT_QUATERNION.clone();
       this.savedZoom = 0.9;
       this.threshold = 30;          // 0–100, scaled to 0–1 in shader
       this.contrast = 1.0;          // 0.5–3.0
@@ -174,12 +181,11 @@
       this.container.innerHTML = "";
       this.container.appendChild(this.renderer.domElement);
 
-      // sliceGroup is the rotated group; the volume cube is added here.
-      // scale.y = -1 flips the volume so its orientation matches the 2D
-      // dual_view projection (matching gently's viewer).
+      // volumeGroup carries the user's accumulated rotation (as a quaternion)
+      // and a Y-flip so the embryo orientation matches the 2D dual_view
+      // projection (matching gently's viewer).
       this.volumeGroup = new THREE.Group();
-      this.volumeGroup.rotation.x = this.savedRotation.x;
-      this.volumeGroup.rotation.y = this.savedRotation.y;
+      this.volumeGroup.quaternion.copy(this.savedQuaternion);
       this.volumeGroup.scale.y = -1;
       this.scene.add(this.volumeGroup);
 
@@ -390,34 +396,83 @@
     }
 
     resetView() {
-      this.savedRotation = { x: -0.5, y: 0.5 };
+      this.savedQuaternion.copy(this.DEFAULT_QUATERNION);
       this.savedZoom = 0.9;
-      if (this.volumeGroup) {
-        this.volumeGroup.rotation.x = this.savedRotation.x;
-        this.volumeGroup.rotation.y = this.savedRotation.y;
-        this.volumeGroup.rotation.z = 0;
-      }
+      if (this.volumeGroup) this.volumeGroup.quaternion.copy(this.savedQuaternion);
       if (this.camera) this.camera.position.z = this.savedZoom;
+    }
+
+    /** Snap to a canonical view direction, looking along ±X / ±Y / ±Z in
+     *  the volume's local frame. Useful for "show me the front", "now from
+     *  the top", etc. without having to orbit by hand. The argument is a
+     *  string like 'front' | 'back' | 'top' | 'bottom' | 'left' | 'right'.
+     *
+     *  Mapping (local axes after the Y-flip already applied to volumeGroup):
+     *   front  = looking along -Z in volume local
+     *   back   = looking along +Z
+     *   top    = looking along -Y
+     *   bottom = looking along +Y
+     *   right  = looking along -X
+     *   left   = looking along +X
+     */
+    snapView(name) {
+      // We need a quaternion such that the chosen local axis becomes the
+      // camera's -Z (i.e. points TOWARD the camera). The camera looks down
+      // -Z in world space, so the local axis we want to face the camera
+      // should map to world +Z. Three.js Quaternion.setFromUnitVectors(a, b)
+      // returns the rotation that rotates `a` onto `b`.
+      const target = new THREE.Vector3();
+      switch (name) {
+        case "front":  target.set(0, 0, 1);  break;
+        case "back":   target.set(0, 0, -1); break;
+        case "top":    target.set(0, 1, 0);  break;
+        case "bottom": target.set(0, -1, 0); break;
+        case "right":  target.set(1, 0, 0);  break;
+        case "left":   target.set(-1, 0, 0); break;
+        default: return;
+      }
+      const worldZ = new THREE.Vector3(0, 0, 1);
+      const q = new THREE.Quaternion().setFromUnitVectors(target, worldZ);
+      this.savedQuaternion.copy(q);
+      if (this.volumeGroup) this.volumeGroup.quaternion.copy(q);
     }
 
     _installInteractions() {
       const el = this.renderer.domElement;
+
+      // Trackball-style drag: each mousemove builds a tiny rotation in
+      // SCREEN space (camera-aligned axes) and pre-multiplies it onto the
+      // accumulated quaternion. Pre-multiplying applies the new rotation in
+      // world frame, which — since the camera is fixed at +Z looking at
+      // origin — IS the screen frame. So drag-right always rotates the
+      // volume "around screen-Y" no matter how it's already oriented:
+      // no gimbal lock, no twisty surprises near the poles.
+      const SENS = 0.005;
+      const X_AXIS = new THREE.Vector3(1, 0, 0);
+      const Y_AXIS = new THREE.Vector3(0, 1, 0);
+      const Z_AXIS = new THREE.Vector3(0, 0, 1);
+      const _q = new THREE.Quaternion();
+
       el.addEventListener("mousedown", (e) => {
         this.isDragging = true;
         this.prevMouse = { x: e.clientX, y: e.clientY };
       });
       el.addEventListener("mousemove", (e) => {
         if (!this.isDragging) return;
-        const dx = e.clientX - this.prevMouse.x;
-        const dy = e.clientY - this.prevMouse.y;
+        const dx = (e.clientX - this.prevMouse.x) * SENS;
+        const dy = (e.clientY - this.prevMouse.y) * SENS;
         if (e.shiftKey) {
-          this.volumeGroup.rotation.z += dx * 0.01;
+          // Roll: rotate around the camera's view axis (screen Z).
+          _q.setFromAxisAngle(Z_AXIS, -dx);
+          this.volumeGroup.quaternion.premultiply(_q);
         } else {
-          this.volumeGroup.rotation.y += dx * 0.01;
-          this.volumeGroup.rotation.x += dy * 0.01;
+          // Yaw + pitch in screen frame.
+          _q.setFromAxisAngle(Y_AXIS, dx);
+          this.volumeGroup.quaternion.premultiply(_q);
+          _q.setFromAxisAngle(X_AXIS, dy);
+          this.volumeGroup.quaternion.premultiply(_q);
         }
-        this.savedRotation.x = this.volumeGroup.rotation.x;
-        this.savedRotation.y = this.volumeGroup.rotation.y;
+        this.savedQuaternion.copy(this.volumeGroup.quaternion);
         this.prevMouse = { x: e.clientX, y: e.clientY };
       });
       window.addEventListener("mouseup", () => (this.isDragging = false));

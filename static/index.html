@@ -41,6 +41,16 @@
             <span id="tp-readout">—</span>
             <button id="next-tp" title="Next timepoint (→)">▶</button>
           </div>
+          <div class="control view-snaps">
+            <span class="control-mini-label">View:</span>
+            <button class="snap-btn" data-snap="front"  title="Look at front face (-Z)">F</button>
+            <button class="snap-btn" data-snap="back"   title="Look at back face (+Z)">B</button>
+            <button class="snap-btn" data-snap="top"    title="Look at top (-Y)">T</button>
+            <button class="snap-btn" data-snap="bottom" title="Look at bottom (+Y)">Bo</button>
+            <button class="snap-btn" data-snap="left"   title="Look at left (+X)">L</button>
+            <button class="snap-btn" data-snap="right"  title="Look at right (-X)">R</button>
+            <button class="snap-btn snap-reset" id="snap-reset" title="Reset to default view">⟲</button>
+          </div>
           <span class="hint">Drag: rotate · Shift+Drag: roll · Scroll: zoom · Double-click: reset</span>
         </div>
         <div id="viewer-3d"></div>
