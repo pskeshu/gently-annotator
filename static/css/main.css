@@ -451,6 +451,24 @@ html, body {
 
 #viewer-3d canvas { display: block; }
 
+/* Subtle frame around the orientation gizmo viewport (bottom-left). The
+   gizmo itself is rendered to the WebGL canvas; this is just a CSS
+   "panel" sized to match the gizmo viewport so the user has a clearly
+   demarcated axis-indicator area. The viewport size is computed in JS
+   as min(180, max(120, 22% of min canvas dim)); we pick a value in
+   that range and keep it visually consistent. */
+#gizmo-frame {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: 160px;
+  height: 160px;
+  border: 1px solid rgba(201, 209, 217, 0.18);
+  border-radius: 6px;
+  background: rgba(13, 17, 23, 0.35);
+  pointer-events: none;
+}
+
 .viewer-status {
   position: absolute;
   top: 50%;

@@ -180,6 +180,12 @@
       this.renderer.setClearColor(0x000000);
       this.container.innerHTML = "";
       this.container.appendChild(this.renderer.domElement);
+      // Decorative frame around the orientation gizmo viewport (sized
+      // dynamically each render frame to match the WebGL viewport).
+      const frame = document.createElement("div");
+      frame.id = "gizmo-frame";
+      frame.setAttribute("aria-hidden", "true");
+      this.container.appendChild(frame);
 
       // volumeGroup carries the user's accumulated rotation (as a quaternion)
       // and a Y-flip so the embryo orientation matches the 2D dual_view
@@ -379,31 +385,35 @@
       return g;
     }
 
-    /** Bidirectional axis: shaft from -dir*ARROW_LEN to +dir*ARROW_LEN with a
-     *  cone tip at the +end, plus camera-facing text labels at each pole.
-     *  posLabel goes at +dir, negLabel at -dir. */
+    /** Bidirectional axis: cylindrical shaft from -dir*ARROW_LEN to
+     *  +dir*ARROW_LEN with a cone tip at the +end, plus camera-facing text
+     *  labels at each pole. posLabel goes at +dir, negLabel at -dir. */
     _makeAxisArrow(dir, color, posLabel, negLabel) {
       const g = new THREE.Group();
-      const ARROW_LEN = 0.85;
-      const TIP_LEN = 0.16;
-      const TIP_RADIUS = 0.06;
-      const LABEL_OFFSET = 0.18;
+      const ARROW_LEN = 0.82;
+      const TIP_LEN = 0.18;
+      const TIP_RADIUS = 0.08;
+      const SHAFT_RADIUS = 0.025;
+      const LABEL_OFFSET = 0.22;
       const v = new THREE.Vector3(...dir).normalize();
       const negV = v.clone().negate();
 
-      // Shaft spans both poles so the user sees the full axis, not just
-      // the anterior half. Stops short of the +tip to make room for the cone.
-      const shaftGeo = new THREE.BufferGeometry().setFromPoints([
-        negV.clone().multiplyScalar(ARROW_LEN),
-        v.clone().multiplyScalar(ARROW_LEN - TIP_LEN),
-      ]);
-      const shaftMat = new THREE.LineBasicMaterial({
-        color, depthTest: false, transparent: true, opacity: 0.9,
+      // Cylinder shaft from negV*ARROW_LEN to v*(ARROW_LEN - TIP_LEN).
+      // CylinderGeometry is built along +Y; align it to the axis below.
+      const shaftStart = negV.clone().multiplyScalar(ARROW_LEN);
+      const shaftEnd = v.clone().multiplyScalar(ARROW_LEN - TIP_LEN);
+      const shaftLen = shaftStart.distanceTo(shaftEnd);
+      const shaftGeo = new THREE.CylinderGeometry(SHAFT_RADIUS, SHAFT_RADIUS, shaftLen, 12);
+      const shaftMat = new THREE.MeshBasicMaterial({
+        color, depthTest: false, transparent: true, opacity: 0.95,
       });
-      g.add(new THREE.Line(shaftGeo, shaftMat));
+      const shaft = new THREE.Mesh(shaftGeo, shaftMat);
+      shaft.position.copy(shaftStart).add(shaftEnd).multiplyScalar(0.5);
+      shaft.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
+      g.add(shaft);
 
       // Cone marks the +dir pole so the axis has an unambiguous direction.
-      const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 14);
+      const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 16);
       const coneMat = new THREE.MeshBasicMaterial({
         color, depthTest: false, transparent: true, opacity: 0.95,
       });
@@ -412,9 +422,8 @@
       cone.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v);
       g.add(cone);
 
-      // Sprite labels — always face the gizmo camera regardless of how the
-      // user has rotated the volume. Black stroke makes them readable on
-      // both light and dark backgrounds.
+      // Camera-facing text sprites at both poles, with a black halo so
+      // they read on top of either dark scene or bright fill.
       if (posLabel) {
         const sp = this._makeTextSprite(posLabel, color);
         sp.position.copy(v).multiplyScalar(ARROW_LEN + LABEL_OFFSET);
@@ -450,7 +459,7 @@
         map: tex, transparent: true, depthTest: false, sizeAttenuation: true,
       });
       const sprite = new THREE.Sprite(mat);
-      sprite.scale.set(0.3, 0.3, 1);
+      sprite.scale.set(0.42, 0.42, 1);
       return sprite;
     }
 
@@ -585,10 +594,19 @@
           this._gizmoGroup.quaternion.copy(this.volumeGroup.quaternion);
           this._gizmoGroup.scale.copy(this.volumeGroup.scale);
         }
-        const SIZE = Math.min(110, Math.max(70, Math.floor(Math.min(w, h) * 0.16)));
-        const MARGIN = 12;
+        const SIZE = Math.min(180, Math.max(120, Math.floor(Math.min(w, h) * 0.22)));
+        const MARGIN = 14;
         const gx = MARGIN;            // bottom-left
         const gy = MARGIN;  // y is from bottom-left in WebGL viewport coords
+        // Keep the CSS frame (if any) in sync with the WebGL viewport so the
+        // panel border lines up exactly with the gizmo's drawn area.
+        const frame = this.container.querySelector("#gizmo-frame");
+        if (frame) {
+          frame.style.width = SIZE + "px";
+          frame.style.height = SIZE + "px";
+          frame.style.left = MARGIN + "px";
+          frame.style.bottom = MARGIN + "px";
+        }
         this.renderer.setViewport(gx, gy, SIZE, SIZE);
         this.renderer.setScissor(gx, gy, SIZE, SIZE);
         this.renderer.setScissorTest(true);
