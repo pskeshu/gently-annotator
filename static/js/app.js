@@ -1511,18 +1511,24 @@
     const ta = document.getElementById("notes-textarea");
     if (!ta) return;
     const tp = state.selected.timepoint;
-    const enabled = tp != null && state.annotations.loaded && !isViewOnly();
-    ta.disabled = !enabled;
+    const hasContext = tp != null && state.annotations.loaded;
+    // disabled = totally inert (no tp loaded). readOnly = visible but not
+    // editable (view-only mode). Keep them distinct so the viewed
+    // annotator's note text is still readable + selectable.
+    ta.disabled = !hasContext;
     ta.readOnly = isViewOnly();
-    if (!enabled) {
+    if (!hasContext) {
       ta.value = "";
+      ta.placeholder = "optional morphology notes (auto-saves)";
       return;
     }
     const stored = state.annotations.notes.get(tp) || "";
-    // Avoid clobbering the user's in-progress edit.
     if (document.activeElement !== ta) {
       ta.value = stored;
     }
+    ta.placeholder = isViewOnly()
+      ? `no note from ${state.viewingAs} at this timepoint`
+      : "optional morphology notes (auto-saves)";
   }
 
   function renderExcludeUI() {
