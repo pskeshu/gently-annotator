@@ -522,13 +522,68 @@
           q = new THREE.Quaternion().setFromRotationMatrix(R);
         }
       } else if (A) {
-        q = new THREE.Quaternion().setFromUnitVectors(A, new THREE.Vector3(-1, 0, 0));
+        // AP only: yaw around world-Y so AP's XZ projection points at -X.
+        // Preserves the camera's "up" direction so the embryo doesn't appear
+        // to roll around its long axis after aligning. The Y component of
+        // the saved AP is preserved (so a tilted-up AP stays tilted-up,
+        // just spun around to face left).
+        return this._yawAlignAP(ap);
       } else {
-        q = new THREE.Quaternion().setFromUnitVectors(B, new THREE.Vector3(0, 1, 0));
+        // DV only: pitch around world-X so DV's YZ projection points at +Y.
+        return this._pitchAlignDV(dv);
       }
 
       this.volumeGroup.quaternion.copy(q);
       this.savedQuaternion.copy(q);
+      return true;
+    }
+
+    /** Yaw the volume around world-Y so the saved local AP direction lands
+     *  with its X-Z projection on world -X. Preserves world up, so the
+     *  embryo's screen orientation stays familiar. Returns true on success. */
+    _yawAlignAP(localAP) {
+      this.volumeGroup.updateMatrixWorld(true);
+      const wp = new THREE.Vector3(localAP[0], localAP[1], localAP[2]);
+      this.volumeGroup.localToWorld(wp);
+      const origin = new THREE.Vector3().setFromMatrixPosition(
+        this.volumeGroup.matrixWorld
+      );
+      const worldDir = wp.sub(origin);
+      if (Math.hypot(worldDir.x, worldDir.z) < 1e-6) {
+        // AP is along world-Y; pure yaw can't place it. Caller can decide
+        // to fall back to shortest-arc, but for now return false silently.
+        return false;
+      }
+      const theta = Math.atan2(-worldDir.z, -worldDir.x);
+      const q = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(0, 1, 0),
+        theta
+      );
+      this.volumeGroup.quaternion.premultiply(q);
+      this.savedQuaternion.copy(this.volumeGroup.quaternion);
+      return true;
+    }
+
+    /** Pitch the volume around world-X so the saved local DV direction lands
+     *  with its Y-Z projection on world +Y. Preserves world left-right. */
+    _pitchAlignDV(localDV) {
+      this.volumeGroup.updateMatrixWorld(true);
+      const wp = new THREE.Vector3(localDV[0], localDV[1], localDV[2]);
+      this.volumeGroup.localToWorld(wp);
+      const origin = new THREE.Vector3().setFromMatrixPosition(
+        this.volumeGroup.matrixWorld
+      );
+      const worldDir = wp.sub(origin);
+      if (Math.hypot(worldDir.y, worldDir.z) < 1e-6) {
+        return false;
+      }
+      const alpha = Math.atan2(-worldDir.z, worldDir.y);
+      const q = new THREE.Quaternion().setFromAxisAngle(
+        new THREE.Vector3(1, 0, 0),
+        alpha
+      );
+      this.volumeGroup.quaternion.premultiply(q);
+      this.savedQuaternion.copy(this.volumeGroup.quaternion);
       return true;
     }
 
