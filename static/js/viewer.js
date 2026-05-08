@@ -185,9 +185,12 @@
 
     setVolume({ data, shape, voxelSizeUm }) {
       // data: Uint8Array | base64 string. shape: [zd, h, w]. voxelSizeUm: [dz, dy, dx].
+      //
+      // Atomic swap: build the new mesh fully, replace the live references,
+      // THEN dispose the old. Doing dispose-first leaves the scene empty for
+      // a frame and shows a black flicker between timepoints.
       if (!this._mounted) return;
       const bytes = data instanceof Uint8Array ? data : decodeBase64ToUint8(data);
-      this._disposeVolume();
 
       const [zd, h, w] = shape;
       if (bytes.length !== zd * h * w) {
@@ -208,7 +211,6 @@
       tex3d.wrapT = THREE.ClampToEdgeWrapping;
       tex3d.unpackAlignment = 1;
       tex3d.needsUpdate = true;
-      this.volumeTexture3D = tex3d;
 
       // Physical extents normalized to the largest axis so the cube
       // fits inside a unit sphere. Without this you get a Z-squished
@@ -242,9 +244,23 @@
 
       const geo = new THREE.BoxGeometry(boxW, boxH, boxD);
       const mesh = new THREE.Mesh(geo, material);
+
+      // --- Atomic swap ---
+      const oldMesh = this.volumeMesh;
+      const oldMaterial = this.volumeMaterial;
+      const oldTexture = this.volumeTexture3D;
+
       this.volumeGroup.add(mesh);
       this.volumeMesh = mesh;
       this.volumeMaterial = material;
+      this.volumeTexture3D = tex3d;
+
+      if (oldMesh) {
+        this.volumeGroup.remove(oldMesh);
+        oldMesh.geometry?.dispose();
+      }
+      if (oldMaterial) oldMaterial.dispose();
+      if (oldTexture) oldTexture.dispose();
     }
 
     setThreshold(t) {
@@ -323,6 +339,12 @@
       const animate = () => {
         this.animationId = requestAnimationFrame(animate);
         if (this.volumeMesh && this.volumeMaterial) {
+          // Force the matrix update before reading worldToLocal. Three.js
+          // only updates matrixWorld during render(), so on the first frame
+          // after a fresh mesh swap the worldToLocal would use an identity
+          // matrix and the uniform would briefly point at the un-rotated
+          // camera position — causing a 1-frame "camera reset" flicker.
+          this.volumeMesh.updateMatrixWorld(true);
           // Camera position in the volume cube's local space (accounts
           // for the volumeGroup's rotation AND the Y scale flip).
           this._cameraObjectPos.copy(this.camera.position);
