@@ -310,6 +310,44 @@
       }
     }
 
+    /** Snapshot the full reproducible view state — rotation, zoom, and
+     *  the rendering knobs. Returned object is ready to drop into a
+     *  view_params JSON column. */
+    captureViewParams() {
+      const q = this.volumeGroup ? this.volumeGroup.quaternion : new THREE.Quaternion();
+      const zoom = this.camera ? this.camera.position.z : this.savedZoom;
+      return {
+        version: 1,
+        rotation_quat: [q.x, q.y, q.z, q.w],
+        zoom: zoom,
+        threshold: this.threshold,
+        contrast: this.contrast,
+      };
+    }
+
+    /** Restore a view captured by captureViewParams. Out-of-range values
+     *  are clamped; missing fields are left as-is. Returns true on success. */
+    applyViewParams(p) {
+      if (!p || !this.volumeGroup) return false;
+      if (Array.isArray(p.rotation_quat) && p.rotation_quat.length === 4) {
+        const [x, y, z, w] = p.rotation_quat;
+        this.volumeGroup.quaternion.set(x, y, z, w);
+        this.savedQuaternion.copy(this.volumeGroup.quaternion);
+      }
+      if (typeof p.zoom === "number" && this.camera) {
+        const z = Math.max(0.5, Math.min(5, p.zoom));
+        this.camera.position.z = z;
+        this.savedZoom = z;
+      }
+      if (typeof p.threshold === "number") {
+        this.setThreshold(Math.max(0, Math.min(100, p.threshold)));
+      }
+      if (typeof p.contrast === "number") {
+        this.setContrast(Math.max(0.5, Math.min(3.0, p.contrast)));
+      }
+      return true;
+    }
+
     /** Capture an arbitrary world-space direction transformed into
      *  volumeGroup-local coordinates as a unit vector. */
     captureLocalDir(worldX, worldY, worldZ) {

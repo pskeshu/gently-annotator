@@ -994,6 +994,115 @@ body.view-only #viewer-controls {
   text-align: right;
 }
 
+/* ---- view notes ---- */
+#view-notes-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.view-notes-header {
+  margin-top: -2px;
+}
+
+#view-notes-count {
+  text-align: right;
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+#view-notes-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.vn-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 8px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.vn-item.current-tp {
+  border-color: rgba(88, 166, 255, 0.5);
+}
+
+.vn-tag {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(88, 166, 255, 0.2);
+  color: var(--accent-2);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.vn-tp {
+  color: var(--text-2);
+  font-size: 11px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.vn-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text);
+}
+
+.vn-text[contenteditable="true"] {
+  background: var(--bg-3);
+  outline: 1px solid var(--accent);
+  border-radius: 3px;
+  padding: 2px 4px;
+}
+
+.vn-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.vn-action {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.2;
+}
+.vn-action:hover { color: var(--accent-2); border-color: var(--accent); }
+.vn-action.danger:hover { color: var(--bad); border-color: var(--bad); }
+
+.vn-empty {
+  font-style: italic;
+  color: var(--text-2);
+  font-size: 11px;
+  padding: 4px 0;
+}
+
 .notes-status.saving { color: var(--warn); }
 .notes-status.saved  { color: var(--good); }
 .notes-status.error  { color: var(--bad); }

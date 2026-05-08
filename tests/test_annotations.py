@@ -141,3 +141,61 @@ def test_unreliable_range_swaps_start_end(store: AnnotationStore):
     store.add_unreliable_range("D", "S", "E", 80, 50, "k")
     rows = store.list_unreliable_ranges("D", "S", "E", "k")
     assert (rows[0]["start_tp"], rows[0]["end_tp"]) == (50, 80)
+
+
+# ----- view notes -----
+
+def _vp(seed=1):
+    return {
+        "version": 1,
+        "rotation_quat": [0.1 * seed, 0.2 * seed, 0.3 * seed, 0.9],
+        "zoom": 0.9, "threshold": 30, "contrast": 1.0,
+    }
+
+
+def test_view_note_add_list(store: AnnotationStore):
+    rid = store.add_view_note("D", "S", "E", 12, "k", _vp(), "best for head", tag="best")
+    rows = store.list_view_notes("D", "S", "E", "k")
+    assert len(rows) == 1
+    assert rows[0]["id"] == rid
+    assert rows[0]["note"] == "best for head"
+    assert rows[0]["tag"] == "best"
+    assert rows[0]["timepoint"] == 12
+    assert rows[0]["view_params"]["zoom"] == 0.9
+
+
+def test_view_note_multiple_per_timepoint(store: AnnotationStore):
+    """Unlike timepoint_notes, many view notes per (annotator, embryo, tp)."""
+    store.add_view_note("D", "S", "E", 5, "k", _vp(1), "front")
+    store.add_view_note("D", "S", "E", 5, "k", _vp(2), "side")
+    store.add_view_note("D", "S", "E", 5, "k", _vp(3), "top")
+    rows = store.list_view_notes("D", "S", "E", "k")
+    assert len(rows) == 3
+    assert {r["note"] for r in rows} == {"front", "side", "top"}
+
+
+def test_view_note_patch(store: AnnotationStore):
+    rid = store.add_view_note("D", "S", "E", 5, "k", _vp(), "old", tag="best")
+    store.update_view_note(rid, "k", note="new", tag="worst")
+    rows = store.list_view_notes("D", "S", "E", "k")
+    assert rows[0]["note"] == "new"
+    assert rows[0]["tag"] == "worst"
+
+
+def test_view_note_delete_owner_only(store: AnnotationStore):
+    rid = store.add_view_note("D", "S", "E", 5, "kesavan", _vp(), "x")
+    # Trying to delete as a different annotator does nothing.
+    store.delete_view_note(rid, "trisha")
+    assert len(store.list_view_notes("D", "S", "E", "kesavan")) == 1
+    # Owner can delete.
+    store.delete_view_note(rid, "kesavan")
+    assert store.list_view_notes("D", "S", "E", "kesavan") == []
+
+
+def test_view_note_per_annotator(store: AnnotationStore):
+    store.add_view_note("D", "S", "E", 5, "kesavan", _vp(), "k-note")
+    store.add_view_note("D", "S", "E", 5, "trisha", _vp(), "t-note")
+    k = store.list_view_notes("D", "S", "E", "kesavan")
+    t = store.list_view_notes("D", "S", "E", "trisha")
+    assert k[0]["note"] == "k-note"
+    assert t[0]["note"] == "t-note"

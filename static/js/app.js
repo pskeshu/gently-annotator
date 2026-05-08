@@ -49,6 +49,8 @@
       orientations: new Map(),
       // [{id, start_tp, end_tp, notes}, ...]
       unreliableRanges: [],
+      // [{id, timepoint, view_params, note, tag, ...}, ...]
+      viewNotes: [],
     },
     unreliableMarking: null,    // {startTp, startedAt} when user is mid-range
     // Summary across ALL of the current annotator's work — drives sidebar
@@ -335,6 +337,8 @@
     });
 
     // Orientation row.
+    document.getElementById("view-note-add").addEventListener("click", () => captureViewNote());
+
     document.getElementById("orient-save-ap").addEventListener("click", () => saveAxisFromView("ap"));
     document.getElementById("orient-save-dv").addEventListener("click", () => saveAxisFromView("dv"));
     document.getElementById("orient-clear").addEventListener("click", () => clearOrientationHere());
@@ -698,6 +702,7 @@
       flag: { excluded: false, notes: null },
       orientations: new Map(),
       unreliableRanges: [],
+      viewNotes: [],
     };
     state.unreliableMarking = null;
     renderCatalog();
@@ -793,6 +798,7 @@
         ])
       );
       state.annotations.unreliableRanges = data.unreliable_ranges || [];
+      state.annotations.viewNotes = data.view_notes || [];
       state.annotations.loaded = true;
     } catch (err) {
       console.error("loadAnnotations failed:", err);
@@ -898,6 +904,13 @@
         shape: data.shape,
         voxelSizeUm: data.voxel_size_um,
       });
+      // If a view-note "restore" queued specific view params before the
+      // navigation, apply them now that the new volume is rendered.
+      if (state._pendingViewParams) {
+        const p = state._pendingViewParams;
+        state._pendingViewParams = null;
+        applyPendingViewParams(p);
+      }
       const tag = data.fromCache ? "cached" : `${elapsed}s`;
       setStatus(`t=${tp} · ${data.shape.join("×")} · ${tag}`);
       setTimeout(() => clearStatus(), 900);
@@ -1212,6 +1225,7 @@
     renderNoteForCurrentTp();
     renderExcludeUI();
     renderOrientationUI();
+    renderViewNotes();
     updateAnnotTpLabel();
   }
 
@@ -1263,6 +1277,216 @@
         dv: o?.dv_dir || null,
       });
     }
+  }
+
+  // ---- view notes ----
+
+  /** Capture the current viewer state and prompt for a note + optional tag.
+   *  Empty cancels. Saves to the server and re-renders. */
+  async function captureViewNote() {
+    if (isViewOnly()) return readOnlyToast();
+    if (!requireAnnotatorOrPrompt()) return;
+    const tp = state.selected.timepoint;
+    if (tp == null || !state.viewer) {
+      setStatus("Pick an embryo + timepoint first.", true);
+      setTimeout(clearStatus, 1500);
+      return;
+    }
+    const view_params = state.viewer.captureViewParams();
+    const text = window.prompt(
+      `View note for t=${tp}\n\n` +
+      `Captures the current camera rotation, zoom, threshold, and contrast.\n` +
+      `You can prefix with a tag — "best: …", "worst: …", "diagnostic: …" — and ` +
+      `it'll be parsed as the tag.\n\nNote:`
+    );
+    if (text == null) return;
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    let tag = null;
+    let note = trimmed;
+    const m = trimmed.match(/^([A-Za-z][A-Za-z0-9_-]{0,23})\s*:\s*(.+)$/s);
+    if (m) {
+      tag = m[1].toLowerCase();
+      note = m[2].trim();
+    }
+
+    const { dataset, session, embryo } = state.selected;
+    try {
+      const r = await API.addViewNote(dataset, session, embryo, {
+        annotator: state.annotator, timepoint: tp, view_params, note, tag,
+      });
+      state.annotations.viewNotes.push({
+        id: r.id, dataset, session, embryo, timepoint: tp,
+        view_params, note, tag, annotator: state.annotator,
+      });
+      renderViewNotes();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`, true);
+    }
+  }
+
+  async function restoreViewNote(noteId) {
+    const vn = state.annotations.viewNotes.find((x) => x.id === noteId);
+    if (!vn || !state.viewer) return;
+    if (vn.timepoint !== state.selected.timepoint) {
+      // Jump to that tp first; viewer.applyViewParams runs after the volume loads.
+      state._pendingViewParams = vn.view_params;
+      await loadTimepoint(vn.timepoint);
+    } else {
+      applyPendingViewParams(vn.view_params);
+    }
+    // Reflect threshold/contrast in the slider DOM too.
+    syncSlidersFromViewer();
+  }
+
+  /** Called from loadTimepoint() once the new volume is rendered, if a
+   *  pending view-params snapshot is queued. */
+  function applyPendingViewParams(p) {
+    if (!state.viewer) return;
+    state.viewer.applyViewParams(p);
+    syncSlidersFromViewer();
+  }
+
+  function syncSlidersFromViewer() {
+    if (!state.viewer) return;
+    const t = document.getElementById("threshold");
+    const c = document.getElementById("contrast");
+    const tv = document.getElementById("threshold-val");
+    const cv = document.getElementById("contrast-val");
+    if (t) t.value = state.viewer.threshold;
+    if (c) c.value = Math.round(state.viewer.contrast * 100);
+    if (tv) tv.textContent = (state.viewer.threshold / 100).toFixed(2);
+    if (cv) cv.textContent = state.viewer.contrast.toFixed(1);
+  }
+
+  async function deleteViewNote(noteId) {
+    if (isViewOnly()) return readOnlyToast();
+    if (!confirm("Delete this view note?")) return;
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.deleteViewNote(dataset, session, embryo, noteId, state.annotator);
+      state.annotations.viewNotes = state.annotations.viewNotes.filter(
+        (x) => x.id !== noteId
+      );
+      renderViewNotes();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Delete failed: ${err.message}`, true);
+    }
+  }
+
+  async function patchViewNoteText(noteId, newText) {
+    if (isViewOnly()) return;
+    let note = newText.trim();
+    let tag = null;
+    const m = note.match(/^([A-Za-z][A-Za-z0-9_-]{0,23})\s*:\s*(.+)$/s);
+    if (m) { tag = m[1].toLowerCase(); note = m[2].trim(); }
+    if (!note) return deleteViewNote(noteId);
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.patchViewNote(dataset, session, embryo, noteId, {
+        annotator: state.annotator, note, tag,
+      });
+      const local = state.annotations.viewNotes.find((x) => x.id === noteId);
+      if (local) { local.note = note; local.tag = tag; }
+      renderViewNotes();
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`, true);
+    }
+  }
+
+  function renderViewNotes() {
+    const list = document.getElementById("view-notes-list");
+    const count = document.getElementById("view-notes-count");
+    const addBtn = document.getElementById("view-note-add");
+    if (!list || !count || !addBtn) return;
+    const vns = state.annotations.viewNotes || [];
+    const tp = state.selected.timepoint;
+    addBtn.disabled = isViewOnly() || tp == null || !state.annotations.loaded;
+
+    count.textContent = vns.length === 0 ? "(none)" :
+      vns.length === 1 ? "1 view note" : `${vns.length} view notes`;
+
+    if (vns.length === 0) {
+      list.innerHTML = `<li class="vn-empty">No view notes yet for this embryo.</li>`;
+      return;
+    }
+    // Sort: current tp first, then by tp ascending.
+    const sorted = vns.slice().sort((a, b) => {
+      if (a.timepoint === tp && b.timepoint !== tp) return -1;
+      if (b.timepoint === tp && a.timepoint !== tp) return 1;
+      return (a.timepoint - b.timepoint) || (a.id - b.id);
+    });
+    list.innerHTML = sorted.map((vn) => {
+      const isCurrent = vn.timepoint === tp;
+      const tagHtml = vn.tag ? `<span class="vn-tag">${escapeHtml(vn.tag)}</span>` : "";
+      return `
+        <li class="vn-item${isCurrent ? " current-tp" : ""}" data-id="${vn.id}">
+          ${tagHtml}
+          <span class="vn-tp">t=${vn.timepoint}</span>
+          <span class="vn-text" data-edit="false">${escapeHtml(vn.note)}</span>
+          <span class="vn-actions">
+            <button class="vn-action vn-restore" type="button" title="Snap viewer to this exact view">↻</button>
+            <button class="vn-action vn-edit" type="button" title="Edit (prefix with a tag like 'best: …')">✎</button>
+            <button class="vn-action vn-del danger" type="button" title="Delete">✕</button>
+          </span>
+        </li>
+      `;
+    }).join("");
+
+    list.querySelectorAll(".vn-restore").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        const id = parseInt(e.target.closest(".vn-item").dataset.id, 10);
+        restoreViewNote(id);
+      });
+    });
+    list.querySelectorAll(".vn-del").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        const id = parseInt(e.target.closest(".vn-item").dataset.id, 10);
+        deleteViewNote(id);
+      });
+    });
+    list.querySelectorAll(".vn-edit").forEach((b) => {
+      b.addEventListener("click", (e) => {
+        if (isViewOnly()) return readOnlyToast();
+        const li = e.target.closest(".vn-item");
+        const id = parseInt(li.dataset.id, 10);
+        const span = li.querySelector(".vn-text");
+        const original = span.textContent;
+        // Reconstruct "tag: note" if there's a tag, so editing keeps the form.
+        const vn = state.annotations.viewNotes.find((x) => x.id === id);
+        const editing = vn?.tag ? `${vn.tag}: ${vn.note}` : vn ? vn.note : original;
+        span.textContent = editing;
+        span.dataset.edit = "true";
+        span.contentEditable = "true";
+        span.focus();
+        const range = document.createRange();
+        range.selectNodeContents(span);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        const commit = () => {
+          span.contentEditable = "false";
+          span.dataset.edit = "false";
+          span.removeEventListener("blur", commit);
+          span.removeEventListener("keydown", onKey);
+          patchViewNoteText(id, span.textContent);
+        };
+        const onKey = (ev) => {
+          if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); commit(); }
+          if (ev.key === "Escape") {
+            span.textContent = original;
+            span.contentEditable = "false";
+            span.dataset.edit = "false";
+            span.removeEventListener("blur", commit);
+            span.removeEventListener("keydown", onKey);
+          }
+        };
+        span.addEventListener("blur", commit);
+        span.addEventListener("keydown", onKey);
+      });
+    });
   }
 
   function updateAnnotTpLabel() {

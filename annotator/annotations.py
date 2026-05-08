@@ -84,6 +84,29 @@ CREATE INDEX IF NOT EXISTS idx_orientations_lookup
 
 -- Closed [start_tp, end_tp] ranges where the annotator declared the
 -- orientation unreliable (twitching, ambiguity, occlusion, etc.).
+-- "View notes" — annotations attached to a specific reproducible camera
+-- pose. Many allowed per (dataset, session, embryo, timepoint, annotator)
+-- since each one labels a distinct view. view_params is a JSON blob
+-- containing rotation_quat (4 floats), zoom (1 float), threshold (0–100),
+-- contrast (0.5–3.0), and a version field for future-proofing. tag is an
+-- optional free-form short string (e.g. "best", "worst", "occluded").
+CREATE TABLE IF NOT EXISTS view_notes (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  dataset     TEXT    NOT NULL,
+  session     TEXT    NOT NULL,
+  embryo      TEXT    NOT NULL,
+  timepoint   INTEGER NOT NULL,
+  view_params TEXT    NOT NULL,
+  note        TEXT    NOT NULL,
+  tag         TEXT,
+  annotator   TEXT    NOT NULL,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_view_notes_lookup
+  ON view_notes(dataset, session, embryo, annotator);
+CREATE INDEX IF NOT EXISTS idx_view_notes_tp
+  ON view_notes(dataset, session, embryo, timepoint, annotator);
+
 CREATE TABLE IF NOT EXISTS orientation_unreliable_ranges (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   dataset     TEXT    NOT NULL,
@@ -426,6 +449,100 @@ class AnnotationStore:
             c.execute(
                 "DELETE FROM orientation_unreliable_ranges WHERE id=? AND annotator=?",
                 (range_id, annotator),
+            )
+
+    # ---- view notes ----
+
+    def add_view_note(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        timepoint: int,
+        annotator: str,
+        view_params: dict,
+        note: str,
+        tag: str | None = None,
+    ) -> int:
+        import json as _json
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO view_notes
+                  (dataset, session, embryo, timepoint, view_params, note, tag, annotator)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    dataset, session, embryo, timepoint,
+                    _json.dumps(view_params), note, tag, annotator,
+                ),
+            )
+            return cur.lastrowid
+
+    def update_view_note(
+        self,
+        note_id: int,
+        annotator: str,
+        note: str | None = None,
+        tag: str | None = None,
+        view_params: dict | None = None,
+    ) -> None:
+        """Patch any subset of (note, tag, view_params). Annotator owns the row."""
+        import json as _json
+        sets = []
+        params: list = []
+        if note is not None:
+            sets.append("note = ?")
+            params.append(note)
+        if tag is not None:
+            sets.append("tag = ?")
+            params.append(tag)
+        if view_params is not None:
+            sets.append("view_params = ?")
+            params.append(_json.dumps(view_params))
+        if not sets:
+            return
+        sets.append("updated_at = CURRENT_TIMESTAMP")
+        params.extend([note_id, annotator])
+        with self._conn() as c:
+            c.execute(
+                f"UPDATE view_notes SET {', '.join(sets)} "
+                f"WHERE id = ? AND annotator = ?",
+                params,
+            )
+
+    def list_view_notes(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        annotator: str,
+    ) -> list[dict]:
+        import json as _json
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT * FROM view_notes
+                WHERE dataset=? AND session=? AND embryo=? AND annotator=?
+                ORDER BY timepoint, id
+                """,
+                (dataset, session, embryo, annotator),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["view_params"] = _json.loads(d["view_params"])
+            except Exception:
+                d["view_params"] = {}
+            out.append(d)
+        return out
+
+    def delete_view_note(self, note_id: int, annotator: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "DELETE FROM view_notes WHERE id=? AND annotator=?",
+                (note_id, annotator),
             )
 
     # ---- summary across all of one annotator's work ----

@@ -89,6 +89,21 @@ class UnreliableRangeBody(BaseModel):
     notes: Optional[str] = None
 
 
+class ViewNoteAddBody(BaseModel):
+    annotator: str
+    timepoint: int
+    view_params: dict
+    note: str
+    tag: Optional[str] = None
+
+
+class ViewNotePatchBody(BaseModel):
+    annotator: str
+    note: Optional[str] = None
+    tag: Optional[str] = None
+    view_params: Optional[dict] = None
+
+
 # ---- routes ----
 
 @router.get("/{dataset}/{session}/{embryo}")
@@ -110,6 +125,7 @@ async def get_bundle(
     flag = store.get_flag(dataset, session, embryo, name)
     orientations = store.list_orientations(dataset, session, embryo, name)
     unreliable = store.list_unreliable_ranges(dataset, session, embryo, name)
+    view_notes = store.list_view_notes(dataset, session, embryo, name)
     return {
         "dataset": dataset,
         "session": session,
@@ -121,6 +137,7 @@ async def get_bundle(
         "flag": flag,
         "orientations": orientations,
         "unreliable_ranges": unreliable,
+        "view_notes": view_notes,
     }
 
 
@@ -275,4 +292,62 @@ async def delete_unreliable(
     _check_path(catalog, dataset, session, embryo)
     name = _require_annotator(annotator)
     store.delete_unreliable_range(range_id, name)
+    return {"ok": True}
+
+
+# ---- view notes ----
+
+@router.post("/{dataset}/{session}/{embryo}/view-notes")
+async def add_view_note(
+    dataset: str,
+    session: str,
+    embryo: str,
+    body: ViewNoteAddBody,
+    request: Request,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(body.annotator)
+    rid = store.add_view_note(
+        dataset, session, embryo, body.timepoint, name,
+        view_params=body.view_params, note=body.note, tag=body.tag,
+    )
+    return {"ok": True, "id": rid}
+
+
+@router.patch("/{dataset}/{session}/{embryo}/view-notes/{note_id}")
+async def patch_view_note(
+    dataset: str,
+    session: str,
+    embryo: str,
+    note_id: int,
+    body: ViewNotePatchBody,
+    request: Request,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(body.annotator)
+    store.update_view_note(
+        note_id, name,
+        note=body.note, tag=body.tag, view_params=body.view_params,
+    )
+    return {"ok": True}
+
+
+@router.delete("/{dataset}/{session}/{embryo}/view-notes/{note_id}")
+async def delete_view_note(
+    dataset: str,
+    session: str,
+    embryo: str,
+    note_id: int,
+    request: Request,
+    annotator: Optional[str] = None,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(annotator)
+    store.delete_view_note(note_id, name)
     return {"ok": True}

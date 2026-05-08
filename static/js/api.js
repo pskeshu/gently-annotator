@@ -175,6 +175,41 @@ const API = {
     if (!r.ok) throw new Error(`deleteUnreliableRange: ${r.status}`);
     return r.json();
   },
+
+  // ---- view notes ----
+
+  async addViewNote(dataset, session, embryo, { annotator, timepoint, view_params, note, tag = null }) {
+    const r = await fetch(`${this._annPath(dataset, session, embryo)}/view-notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ annotator, timepoint, view_params, note, tag }),
+    });
+    if (!r.ok) throw new Error(`addViewNote: ${r.status}`);
+    return r.json();
+  },
+
+  async patchViewNote(dataset, session, embryo, note_id, { annotator, note, tag, view_params }) {
+    const body = { annotator };
+    if (note !== undefined) body.note = note;
+    if (tag !== undefined) body.tag = tag;
+    if (view_params !== undefined) body.view_params = view_params;
+    const r = await fetch(`${this._annPath(dataset, session, embryo)}/view-notes/${note_id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`patchViewNote: ${r.status}`);
+    return r.json();
+  },
+
+  async deleteViewNote(dataset, session, embryo, note_id, annotator) {
+    const r = await fetch(
+      `${this._annPath(dataset, session, embryo)}/view-notes/${note_id}?annotator=${encodeURIComponent(annotator)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) throw new Error(`deleteViewNote: ${r.status}`);
+    return r.json();
+  },
 };
 
 window.API = API;

@@ -117,6 +117,18 @@
                     placeholder="optional morphology notes (auto-saves)"></textarea>
           <span id="notes-status" class="notes-status"></span>
         </div>
+
+        <div id="view-notes-section">
+          <div class="annotation-row view-notes-header">
+            <span class="annotation-label">View notes:</span>
+            <button id="view-note-add" type="button" class="orient-btn"
+                    title="Capture the current camera view + write a note that can be restored exactly later">
+              + Capture current view
+            </button>
+            <span id="view-notes-count" class="annotation-spacer"></span>
+          </div>
+          <ul id="view-notes-list"></ul>
+        </div>
       </section>
     </main>
   </div>
