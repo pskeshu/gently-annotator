@@ -24,6 +24,13 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/annotations")
 
 
+@router.get("/annotators")
+async def list_known_annotators(request: Request):
+    """Distinct annotator names known to the DB. Drives the view-as picker."""
+    store = request.app.state.store
+    return {"annotators": store.list_known_annotators()}
+
+
 @router.get("/summary")
 async def get_summary(request: Request, annotator: Optional[str] = None):
     """One row per (dataset, session, embryo) where this annotator has any data.

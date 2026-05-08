@@ -62,6 +62,12 @@ const API = {
     return r.json();
   },
 
+  async knownAnnotators() {
+    const r = await fetch("/api/annotations/annotators");
+    if (!r.ok) throw new Error(`knownAnnotators: ${r.status}`);
+    return r.json();
+  },
+
   async annotationSummary(annotator) {
     const r = await fetch(`/api/annotations/summary?annotator=${encodeURIComponent(annotator)}`);
     if (!r.ok) throw new Error(`annotationSummary: ${r.status}`);

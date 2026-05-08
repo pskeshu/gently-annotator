@@ -430,6 +430,28 @@ class AnnotationStore:
 
     # ---- summary across all of one annotator's work ----
 
+    # ---- known annotators across the whole DB ----
+
+    def list_known_annotators(self) -> list[str]:
+        """Distinct annotator names that have at least one row in any table.
+
+        Used to populate the "view as someone else" dropdown so users can
+        pick from people who've actually done work, not type a free-form
+        name and risk a typo.
+        """
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT annotator FROM transitions
+                UNION SELECT annotator FROM timepoint_notes
+                UNION SELECT annotator FROM embryo_flags
+                UNION SELECT annotator FROM orientations
+                UNION SELECT annotator FROM orientation_unreliable_ranges
+                ORDER BY annotator COLLATE NOCASE
+                """
+            ).fetchall()
+            return [r[0] for r in rows]
+
     def summary_for_annotator(self, annotator: str) -> list[dict]:
         """One row per (dataset, session, embryo) where the annotator has any data.
 

@@ -30,6 +30,14 @@
     showEmpty: false,
     editingAnnotator: false,
     justSavedAnnotator: false,
+    // Authoring vs viewing identity. state.annotator is who you ARE (your
+    // saves get tagged with this). state.viewingAs is null when you're
+    // editing your own work, or another annotator's name when you're
+    // peeking at theirs read-only.
+    viewingAs: null,
+    knownAnnotators: [],          // populated from /api/annotations/annotators
+    annotatorMenuOpen: false,
+    addingAnnotator: false,
     loadingVolume: false,
     // Annotations for the currently selected embryo (current annotator only).
     annotations: {
@@ -66,6 +74,19 @@
     return `${ds}/${ss}/${em}/${tp}`;
   }
 
+  /** Whose annotations the UI should DISPLAY right now. When viewingAs is
+   *  null (the default), that's you. When it's set, you're peeking at
+   *  someone else's work in read-only mode. */
+  function effectiveAnnotator() {
+    return state.viewingAs || state.annotator;
+  }
+
+  /** True when the UI is in read-only "view someone else" mode. Every
+   *  write action checks this and bails out early. */
+  function isViewOnly() {
+    return !!state.viewingAs;
+  }
+
   function summaryKey(dataset, session, embryo) {
     return `${dataset}/${session}/${embryo}`;
   }
@@ -79,26 +100,46 @@
   // ----- bootstrap -----
 
   document.addEventListener("DOMContentLoaded", async () => {
-    setupAnnotator();
+    await setupAnnotator();
     setupControls();
     setupViewer();
     await loadCatalog();
   });
 
-  function setupAnnotator() {
+  async function setupAnnotator() {
     const saved = (localStorage.getItem(ANNOTATOR_KEY) || "").trim();
     state.annotator = saved || null;
-    state.editingAnnotator = !state.annotator;  // edit mode if no name yet
+    state.viewingAs = null;
+    state.addingAnnotator = !state.annotator;  // first-visit -> show add-new immediately
+    await refreshKnownAnnotators();
     renderAnnotator();
   }
 
+  async function refreshKnownAnnotators() {
+    try {
+      const data = await API.knownAnnotators();
+      state.knownAnnotators = data.annotators || [];
+    } catch (err) {
+      console.warn("knownAnnotators load failed:", err.message);
+      state.knownAnnotators = [];
+    }
+  }
+
+  /** Single picker for both "switch identity" (edit-self) and "view as
+   *  someone else" (read-only). The chip is the dropdown trigger; the
+   *  menu lists you (with a ✎ icon) plus all known annotators (with 👁),
+   *  ending with a "+ sign in as new..." option that becomes an inline
+   *  input for renaming yourself or creating a new identity. */
   function renderAnnotator() {
     const root = document.getElementById("annotator-section");
-    if (state.editingAnnotator || !state.annotator) {
+    const flash = state.justSavedAnnotator ? " saved" : "";
+
+    if (state.addingAnnotator) {
       root.innerHTML = `
         <label for="annotator-input">You:</label>
         <input id="annotator-input" type="text" placeholder="your name" autocomplete="off" />
         <button id="annotator-save" type="button">Save</button>
+        ${state.annotator ? '<button id="annotator-cancel" type="button" class="link-btn">cancel</button>' : ''}
       `;
       const input = root.querySelector("#annotator-input");
       const saveBtn = root.querySelector("#annotator-save");
@@ -107,22 +148,21 @@
 
       const commit = () => {
         const name = input.value.trim();
-        if (!name) {
-          input.focus();
-          return;
-        }
+        if (!name) { input.focus(); return; }
         const changed = name !== state.annotator;
         state.annotator = name;
-        state.editingAnnotator = false;
+        state.viewingAs = null;
+        state.addingAnnotator = false;
+        state.annotatorMenuOpen = false;
         state.justSavedAnnotator = true;
         localStorage.setItem(ANNOTATOR_KEY, name);
         renderAnnotator();
-        // If the active annotator changed, refresh both the per-embryo
-        // annotation set (if an embryo is loaded) and the global summary.
+        refreshKnownAnnotators();  // your name is now in the list
         if (changed) {
           flushNoteSave();
           if (state.selected.embryo) loadAnnotations();
           refreshAnnotationSummary();
+          updateViewOnlyChrome();
         }
         setTimeout(() => {
           state.justSavedAnnotator = false;
@@ -135,28 +175,123 @@
         if (e.key === "Enter") { e.preventDefault(); commit(); }
         if (e.key === "Escape" && state.annotator) {
           e.preventDefault();
-          state.editingAnnotator = false;
+          state.addingAnnotator = false;
           renderAnnotator();
         }
       });
-      // Auto-save when the user tabs/clicks away with a non-empty value.
       input.addEventListener("blur", () => {
-        if (input.value.trim() && input.value.trim() !== state.annotator) {
-          commit();
-        }
+        const v = input.value.trim();
+        if (v && v !== state.annotator) commit();
       });
-    } else {
-      const flash = state.justSavedAnnotator ? " saved" : "";
-      root.innerHTML = `
-        <span class="annotator-label">Signed in as</span>
-        <span class="annotator-chip${flash}">${escapeHtml(state.annotator)}</span>
-        <button id="annotator-change" type="button" class="link-btn">change</button>
-      `;
-      root.querySelector("#annotator-change").addEventListener("click", () => {
-        state.editingAnnotator = true;
+      const cancel = root.querySelector("#annotator-cancel");
+      cancel?.addEventListener("click", () => {
+        state.addingAnnotator = false;
         renderAnnotator();
       });
+      return;
     }
+
+    // Build the closed/open dropdown chip.
+    const others = state.knownAnnotators.filter((n) => n !== state.annotator);
+    const viewing = state.viewingAs;
+    const chipName = state.annotator || "(no identity)";
+    let html = `
+      <span class="annotator-label">Signed in as</span>
+      <button id="annotator-trigger" class="annotator-chip${flash} dropdown" type="button"
+              aria-haspopup="listbox" aria-expanded="${state.annotatorMenuOpen ? "true" : "false"}">
+        ${escapeHtml(chipName)} <span class="annotator-caret">▾</span>
+      </button>
+    `;
+    if (state.annotatorMenuOpen) {
+      const items = [];
+      items.push(`
+        <li class="ann-item ${!viewing ? "selected" : ""}" data-action="edit-self">
+          <span class="ann-item-icon">✎</span>${escapeHtml(state.annotator || "")}
+          <span class="ann-item-tag">(you)</span>
+        </li>
+      `);
+      if (others.length) items.push(`<li class="ann-divider"></li>`);
+      for (const name of others) {
+        items.push(`
+          <li class="ann-item ${viewing === name ? "selected" : ""}"
+              data-action="view-as" data-name="${escapeHtml(name)}">
+            <span class="ann-item-icon">👁</span>${escapeHtml(name)}
+            <span class="ann-item-tag">view-only</span>
+          </li>
+        `);
+      }
+      items.push(`<li class="ann-divider"></li>`);
+      items.push(`
+        <li class="ann-item add" data-action="add-new">
+          <span class="ann-item-icon">+</span>sign in as new…
+        </li>
+      `);
+      html += `<ul id="annotator-menu" role="listbox">${items.join("")}</ul>`;
+    }
+    if (viewing) {
+      html += `
+        <div class="viewing-pill" id="viewing-pill" title="Viewing ${escapeHtml(viewing)}'s annotations">
+          <span class="viewing-icon">👁</span>
+          Viewing <b>${escapeHtml(viewing)}</b>
+          <button id="viewing-stop" class="viewing-stop" type="button" aria-label="Stop viewing">✕</button>
+        </div>
+      `;
+    }
+    root.innerHTML = html;
+
+    root.querySelector("#annotator-trigger")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      state.annotatorMenuOpen = !state.annotatorMenuOpen;
+      renderAnnotator();
+    });
+    root.querySelector("#annotator-menu")?.addEventListener("click", (e) => {
+      const li = e.target.closest("li.ann-item");
+      if (!li) return;
+      const action = li.dataset.action;
+      if (action === "edit-self") {
+        state.viewingAs = null;
+        state.annotatorMenuOpen = false;
+      } else if (action === "view-as") {
+        state.viewingAs = li.dataset.name;
+        state.annotatorMenuOpen = false;
+      } else if (action === "add-new") {
+        state.addingAnnotator = true;
+        state.annotatorMenuOpen = false;
+      }
+      renderAnnotator();
+      updateViewOnlyChrome();
+      flushNoteSave();
+      if (state.selected.embryo) loadAnnotations();
+      refreshAnnotationSummary();
+    });
+    root.querySelector("#viewing-stop")?.addEventListener("click", () => {
+      state.viewingAs = null;
+      renderAnnotator();
+      updateViewOnlyChrome();
+      if (state.selected.embryo) loadAnnotations();
+      refreshAnnotationSummary();
+    });
+  }
+
+  // Click outside the dropdown / Esc -> close.
+  document.addEventListener("click", () => {
+    if (state.annotatorMenuOpen) {
+      state.annotatorMenuOpen = false;
+      renderAnnotator();
+    }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.annotatorMenuOpen) {
+      state.annotatorMenuOpen = false;
+      renderAnnotator();
+    }
+  });
+
+  /** Toggle a class on the main column so a soft purple stripe + dim
+   *  appearance signals view-only mode at-a-glance, regardless of
+   *  whether the annotator chip is on screen. */
+  function updateViewOnlyChrome() {
+    document.body.classList.toggle("view-only", isViewOnly());
   }
 
   function setupControls() {
@@ -297,12 +432,12 @@
   }
 
   async function loadAnnotationSummary() {
-    if (!state.annotator) {
+    if (!effectiveAnnotator()) {
       state.annotationSummary = new Map();
       return;
     }
     try {
-      const data = await API.annotationSummary(state.annotator);
+      const data = await API.annotationSummary(effectiveAnnotator());
       state.annotationSummary = new Map(
         (data.items || []).map((it) => [
           summaryKey(it.dataset, it.session, it.embryo),
@@ -643,7 +778,7 @@
       return;
     }
     try {
-      const data = await API.annotations(dataset, session, embryo, state.annotator);
+      const data = await API.annotations(dataset, session, embryo, effectiveAnnotator());
       state.annotations.transitions = data.transitions || [];
       state.annotations.notes = new Map(
         (data.notes || []).map((n) => [n.timepoint, n.note])
@@ -795,6 +930,7 @@
    * relying on the Backspace hotkey.
    */
   async function markStage(stage) {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     if (!state.selected.embryo) return;
     const tp = state.selected.timepoint;
@@ -821,6 +957,7 @@
   }
 
   async function clearStageMarker(stage) {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const { dataset, session, embryo } = state.selected;
     try {
@@ -857,6 +994,7 @@
       clearTimeout(state.noteSaveTimer);
       state.noteSaveTimer = null;
     }
+    if (isViewOnly()) return;  // textarea is disabled, but be defensive
     const tp = state.selected.timepoint;
     if (tp == null || !state.selected.embryo) return;
     if (!state.annotator) return;
@@ -899,6 +1037,7 @@
   // ---- annotations: orientation ----
 
   async function saveAxisFromView(axis) {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const tp = state.selected.timepoint;
     if (tp == null || !state.viewer) return;
@@ -949,6 +1088,7 @@
   }
 
   async function clearOrientationHere() {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const tp = state.selected.timepoint;
     if (tp == null) return;
@@ -971,6 +1111,7 @@
    *   - otherwise, the button starts a new range with this tp as the start.
    */
   async function toggleUnreliableMark() {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const tp = state.selected.timepoint;
     if (tp == null) return;
@@ -1015,6 +1156,7 @@
   }
 
   async function deleteUnreliableRange(rangeId) {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const { dataset, session, embryo } = state.selected;
     try {
@@ -1032,6 +1174,7 @@
   // ---- annotations: exclude ----
 
   async function toggleExclude(excluded) {
+    if (isViewOnly()) return readOnlyToast();
     if (!requireAnnotatorOrPrompt()) return;
     const { dataset, session, embryo } = state.selected;
     if (!embryo) return;
@@ -1045,6 +1188,11 @@
     } catch (err) {
       setStatus(`Flag save failed: ${err.message}`, true);
     }
+  }
+
+  function readOnlyToast() {
+    setStatus(`Read-only — viewing ${state.viewingAs}'s annotations.`, true);
+    setTimeout(clearStatus, 1400);
   }
 
   function requireAnnotatorOrPrompt() {
@@ -1069,7 +1217,7 @@
 
   function renderOrientationUI() {
     const tp = state.selected.timepoint;
-    const enabled = state.annotations.loaded && tp != null;
+    const enabled = state.annotations.loaded && tp != null && !isViewOnly();
     const apBtn = document.getElementById("orient-save-ap");
     const dvBtn = document.getElementById("orient-save-dv");
     const clrBtn = document.getElementById("orient-clear");
@@ -1132,7 +1280,7 @@
     const markerByStage = new Map(
       state.annotations.transitions.map((t) => [t.stage, t.timepoint])
     );
-    const enabled = state.annotations.loaded && tp != null;
+    const enabled = state.annotations.loaded && tp != null && !isViewOnly();
 
     root.innerHTML = state.stages.map((stage, i) => {
       const markerTp = markerByStage.get(stage);
@@ -1363,8 +1511,9 @@
     const ta = document.getElementById("notes-textarea");
     if (!ta) return;
     const tp = state.selected.timepoint;
-    const enabled = tp != null && state.annotations.loaded;
+    const enabled = tp != null && state.annotations.loaded && !isViewOnly();
     ta.disabled = !enabled;
+    ta.readOnly = isViewOnly();
     if (!enabled) {
       ta.value = "";
       return;
@@ -1380,7 +1529,7 @@
     const cb = document.getElementById("exclude-input");
     const label = document.getElementById("exclude-label");
     if (!cb || !label) return;
-    const enabled = state.annotations.loaded && !!state.selected.embryo;
+    const enabled = state.annotations.loaded && !!state.selected.embryo && !isViewOnly();
     cb.disabled = !enabled;
     cb.checked = !!state.annotations.flag.excluded;
     label.classList.toggle("active", !!state.annotations.flag.excluded);
