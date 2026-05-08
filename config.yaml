@@ -1,4 +1,4 @@
-host: 127.0.0.1
+host: 0.0.0.0   # listen on all interfaces — accessible from LAN at http://<host-ip>:8090/
 port: 8090
 
 # Each dataset has an ordered list of roots. The first one that exists is used,
