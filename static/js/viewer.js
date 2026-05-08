@@ -470,6 +470,68 @@
       if (this.camera) this.camera.position.z = this.savedZoom;
     }
 
+    /** Snap the view so the saved AP and DV directions land on the
+     *  screen's canonical positions (anterior = left, dorsal = top).
+     *
+     *  ap, dv: unit vectors in volume-local coordinates (or null/undefined).
+     *
+     *  - Both set:  full alignment using a rotation matrix built from the
+     *               two saved axes. AP -> -X, DV -> +Y, LR -> -Z.
+     *  - One set:   shortest rotation that puts that single axis on its
+     *               canonical position. Other axis free.
+     *  - Neither:   no-op.
+     *
+     *  Accounts for volumeGroup.scale.y = -1 (the Y-flip that aligns the
+     *  volume to the 2D dual-view orientation).
+     */
+    alignToSavedOrientation(ap, dv) {
+      if (!this.volumeGroup) return false;
+      if (!ap && !dv) return false;
+
+      // Y-flip applies to local direction vectors before rotation, since the
+      // group transform is R * S * v.
+      const flipY = (vec) => {
+        const u = new THREE.Vector3(vec[0], -vec[1], vec[2]);
+        return u.normalize();
+      };
+      const A = ap ? flipY(ap) : null;
+      const B = dv ? flipY(dv) : null;
+
+      let q;
+      if (A && B) {
+        // Re-orthogonalize B against A so we always have a clean basis even
+        // if the user saved AP and DV at slightly non-perpendicular poses.
+        const C = new THREE.Vector3().crossVectors(A, B);
+        if (C.lengthSq() < 1e-8) {
+          // AP and DV degenerate (parallel) — fall back to AP-only.
+          q = new THREE.Quaternion().setFromUnitVectors(A, new THREE.Vector3(-1, 0, 0));
+        } else {
+          C.normalize();
+          const Bperp = new THREE.Vector3().crossVectors(C, A).normalize();
+          // R * [A | Bperp | C] = [(-1,0,0) | (0,1,0) | (0,0,-1)]
+          // Right-handed check: cross((-1,0,0), (0,1,0)) = (0,0,-1). ✓
+          const Mlocal = new THREE.Matrix4().makeBasis(A, Bperp, C);
+          const Mworld = new THREE.Matrix4().makeBasis(
+            new THREE.Vector3(-1, 0, 0),
+            new THREE.Vector3(0, 1, 0),
+            new THREE.Vector3(0, 0, -1)
+          );
+          // R = Mworld * Mlocal^T (since Mlocal is orthonormal)
+          const Mt = Mlocal.clone().transpose();
+          const R = Mworld.multiply(Mt);
+          q = new THREE.Quaternion().setFromRotationMatrix(R);
+        }
+      } else if (A) {
+        q = new THREE.Quaternion().setFromUnitVectors(A, new THREE.Vector3(-1, 0, 0));
+      } else {
+        q = new THREE.Quaternion().setFromUnitVectors(B, new THREE.Vector3(0, 1, 0));
+      }
+
+      this.volumeGroup.quaternion.copy(q);
+      this.savedQuaternion.copy(q);
+      return true;
+    }
+
     /** Snap to a canonical view direction, looking along ±X / ±Y / ±Z in
      *  the volume's local frame. Useful for "show me the front", "now from
      *  the top", etc. without having to orbit by hand. The argument is a

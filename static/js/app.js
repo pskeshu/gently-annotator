@@ -203,6 +203,7 @@
     document.getElementById("orient-save-ap").addEventListener("click", () => saveAxisFromView("ap"));
     document.getElementById("orient-save-dv").addEventListener("click", () => saveAxisFromView("dv"));
     document.getElementById("orient-clear").addEventListener("click", () => clearOrientationHere());
+    document.getElementById("orient-align").addEventListener("click", () => alignToSavedOrientation());
     document.getElementById("orient-unreliable").addEventListener("click", () => toggleUnreliableMark());
     document.getElementById("orient-show-axes").addEventListener("change", (e) => {
       if (state.viewer) state.viewer.setAxesVisible(e.target.checked);
@@ -260,6 +261,9 @@
       }
       if (e.key === "o" || e.key === "O") {
         clearOrientationHere(); e.preventDefault(); return;
+      }
+      if (e.key === "r" || e.key === "R") {
+        alignToSavedOrientation(); e.preventDefault(); return;
       }
       if (e.key === "Escape" && state.unreliableMarking) {
         state.unreliableMarking = null;
@@ -921,6 +925,26 @@
       refreshAnnotationSummary();
     } catch (err) {
       setStatus(`Save failed: ${err.message}`, true);
+    }
+  }
+
+  /** Restore the view to the saved AP/DV orientation at the current tp.
+   *  If only one axis is saved, do the shortest rotation to put that one
+   *  on its canonical position. If neither is saved, a brief status
+   *  message tells the user there's nothing to align to. */
+  function alignToSavedOrientation() {
+    if (!state.viewer) return;
+    const tp = state.selected.timepoint;
+    if (tp == null) return;
+    const o = state.annotations.orientations.get(tp);
+    if (!o || (!o.ap_dir && !o.dv_dir)) {
+      setStatus("No AP or DV saved at this timepoint to align to.", true);
+      setTimeout(clearStatus, 1500);
+      return;
+    }
+    const ok = state.viewer.alignToSavedOrientation(o.ap_dir, o.dv_dir);
+    if (!ok) {
+      setStatus("Could not align (viewer not ready).", true);
     }
   }
 

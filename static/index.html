@@ -73,7 +73,8 @@
         <div class="annotation-hint">
           Click a stage to mark this timepoint as its start. Click the same stage again
           (or press <kbd>⌫</kbd>) to remove. <kbd>1</kbd>–<kbd>7</kbd> mark stages,
-          <kbd>←</kbd>/<kbd>→</kbd> step timepoints, <kbd>n</kbd> focus notes.
+          <kbd>←</kbd>/<kbd>→</kbd> step timepoints, <kbd>n</kbd> focus notes,
+          <kbd>r</kbd> snap view to saved AP/DV.
         </div>
 
         <div class="annotation-row" id="orient-row">
@@ -86,6 +87,9 @@
           </button>
           <button id="orient-clear" class="orient-btn" type="button" title="Clear AP/DV at this timepoint (o)">
             Clear
+          </button>
+          <button id="orient-align" class="orient-btn" type="button" title="Snap the view back to the saved AP/DV orientation (r)">
+            <span class="orient-key">R</span> Align to AP/DV
           </button>
           <span class="orient-sep"></span>
           <button id="orient-unreliable" class="orient-btn" type="button" title="Mark a range of timepoints as unreliable (u to start, u again at end)">
