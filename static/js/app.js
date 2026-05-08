@@ -37,7 +37,12 @@
       transitions: [],          // [{stage, timepoint, ...}]
       notes: new Map(),         // tp → note text
       flag: { excluded: false, notes: null },
+      // tp → {ap_dir: [x,y,z]|null, dv_dir: [x,y,z]|null}
+      orientations: new Map(),
+      // [{id, start_tp, end_tp, notes}, ...]
+      unreliableRanges: [],
     },
+    unreliableMarking: null,    // {startTp, startedAt} when user is mid-range
     // Summary across ALL of the current annotator's work — drives sidebar
     // badges. Keyed by "dataset/session/embryo" → {transitions, notes, excluded}.
     annotationSummary: new Map(),
@@ -184,6 +189,15 @@
       toggleExclude(e.target.checked);
     });
 
+    // Orientation row.
+    document.getElementById("orient-save-ap").addEventListener("click", () => saveAxisFromView("ap"));
+    document.getElementById("orient-save-dv").addEventListener("click", () => saveAxisFromView("dv"));
+    document.getElementById("orient-clear").addEventListener("click", () => clearOrientationHere());
+    document.getElementById("orient-unreliable").addEventListener("click", () => toggleUnreliableMark());
+    document.getElementById("orient-show-axes").addEventListener("change", (e) => {
+      if (state.viewer) state.viewer.setAxesVisible(e.target.checked);
+    });
+
     // Timeline strip click → jump to that timepoint.
     document.getElementById("timeline-strip").addEventListener("click", (e) => {
       if (!state.timepoints.length) return;
@@ -222,6 +236,24 @@
       }
       if (e.key === "n" || e.key === "N") {
         document.getElementById("notes-textarea").focus();
+        e.preventDefault();
+        return;
+      }
+      if (e.key === "a" || e.key === "A") {
+        saveAxisFromView("ap"); e.preventDefault(); return;
+      }
+      if (e.key === "d" || e.key === "D") {
+        saveAxisFromView("dv"); e.preventDefault(); return;
+      }
+      if (e.key === "u" || e.key === "U") {
+        toggleUnreliableMark(); e.preventDefault(); return;
+      }
+      if (e.key === "o" || e.key === "O") {
+        clearOrientationHere(); e.preventDefault(); return;
+      }
+      if (e.key === "Escape" && state.unreliableMarking) {
+        state.unreliableMarking = null;
+        renderAnnotationUI();
         e.preventDefault();
       }
     });
@@ -515,7 +547,10 @@
       transitions: [],
       notes: new Map(),
       flag: { excluded: false, notes: null },
+      orientations: new Map(),
+      unreliableRanges: [],
     };
+    state.unreliableMarking = null;
     renderCatalog();
     updateBreadcrumb();
     renderAnnotationUI();  // disabled state until annotations load
@@ -602,6 +637,13 @@
       state.annotations.flag = data.flag
         ? { excluded: !!data.flag.excluded, notes: data.flag.notes }
         : { excluded: false, notes: null };
+      state.annotations.orientations = new Map(
+        (data.orientations || []).map((o) => [
+          o.timepoint,
+          { ap_dir: o.ap_dir || null, dv_dir: o.dv_dir || null },
+        ])
+      );
+      state.annotations.unreliableRanges = data.unreliable_ranges || [];
       state.annotations.loaded = true;
     } catch (err) {
       console.error("loadAnnotations failed:", err);
@@ -840,6 +882,96 @@
     el.textContent = text;
   }
 
+  // ---- annotations: orientation ----
+
+  async function saveAxisFromView(axis) {
+    if (!requireAnnotatorOrPrompt()) return;
+    const tp = state.selected.timepoint;
+    if (tp == null || !state.viewer) return;
+    const dir = state.viewer.captureLocalUp();
+    if (!dir) {
+      setStatus("Could not capture orientation (viewer not ready).", true);
+      return;
+    }
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.upsertOrientationAxis(dataset, session, embryo, tp, {
+        annotator: state.annotator, axis, direction: dir,
+      });
+      const row = state.annotations.orientations.get(tp) || { ap_dir: null, dv_dir: null };
+      if (axis === "ap") row.ap_dir = dir; else row.dv_dir = dir;
+      state.annotations.orientations.set(tp, row);
+      renderAnnotationUI();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`, true);
+    }
+  }
+
+  async function clearOrientationHere() {
+    if (!requireAnnotatorOrPrompt()) return;
+    const tp = state.selected.timepoint;
+    if (tp == null) return;
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.clearOrientation(dataset, session, embryo, tp, state.annotator);
+      state.annotations.orientations.delete(tp);
+      renderAnnotationUI();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Clear failed: ${err.message}`, true);
+    }
+  }
+
+  async function toggleUnreliableMark() {
+    if (!requireAnnotatorOrPrompt()) return;
+    const tp = state.selected.timepoint;
+    if (tp == null) return;
+
+    if (!state.unreliableMarking) {
+      // First click — pin a start.
+      state.unreliableMarking = { startTp: tp };
+      renderAnnotationUI();
+      return;
+    }
+    // Second click — commit a range from {startTp, current tp}.
+    const { dataset, session, embryo } = state.selected;
+    const startTp = state.unreliableMarking.startTp;
+    state.unreliableMarking = null;
+    try {
+      const r = await API.addUnreliableRange(dataset, session, embryo, {
+        annotator: state.annotator,
+        start_tp: Math.min(startTp, tp),
+        end_tp: Math.max(startTp, tp),
+      });
+      state.annotations.unreliableRanges.push({
+        id: r.id,
+        start_tp: Math.min(startTp, tp),
+        end_tp: Math.max(startTp, tp),
+        notes: null,
+      });
+      renderAnnotationUI();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Save failed: ${err.message}`, true);
+    }
+  }
+
+  async function deleteUnreliableRange(rangeId) {
+    if (!requireAnnotatorOrPrompt()) return;
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.deleteUnreliableRange(dataset, session, embryo, rangeId, state.annotator);
+      state.annotations.unreliableRanges = state.annotations.unreliableRanges.filter(
+        (r) => r.id !== rangeId
+      );
+      renderAnnotationUI();
+      refreshAnnotationSummary();
+    } catch (err) {
+      setStatus(`Delete failed: ${err.message}`, true);
+    }
+  }
+
   // ---- annotations: exclude ----
 
   async function toggleExclude(excluded) {
@@ -874,7 +1006,53 @@
     renderTimeline();
     renderNoteForCurrentTp();
     renderExcludeUI();
+    renderOrientationUI();
     updateAnnotTpLabel();
+  }
+
+  function renderOrientationUI() {
+    const tp = state.selected.timepoint;
+    const enabled = state.annotations.loaded && tp != null;
+    const apBtn = document.getElementById("orient-save-ap");
+    const dvBtn = document.getElementById("orient-save-dv");
+    const clrBtn = document.getElementById("orient-clear");
+    const unrelBtn = document.getElementById("orient-unreliable");
+    const unrelLabel = document.getElementById("orient-unreliable-label");
+    const stateEl = document.getElementById("orient-state");
+    if (!apBtn) return;
+
+    [apBtn, dvBtn, clrBtn, unrelBtn].forEach((b) => (b.disabled = !enabled));
+
+    const o = state.annotations.orientations.get(tp);
+    apBtn.classList.toggle("has-ap", !!(o && o.ap_dir));
+    dvBtn.classList.toggle("has-dv", !!(o && o.dv_dir));
+
+    if (state.unreliableMarking) {
+      unrelBtn.classList.add("recording");
+      unrelLabel.textContent = `Set range end (start t=${state.unreliableMarking.startTp})`;
+    } else {
+      unrelBtn.classList.remove("recording");
+      unrelLabel.textContent = "Mark unreliable…";
+    }
+
+    // Status text on the right.
+    const inUnreliable = (state.annotations.unreliableRanges || []).find(
+      (r) => tp >= r.start_tp && tp <= r.end_tp
+    );
+    const parts = [];
+    if (o && o.ap_dir) parts.push('<span class="ap">AP set</span>');
+    if (o && o.dv_dir) parts.push('<span class="dv">DV set</span>');
+    if (inUnreliable) parts.push(`<span class="unrel">unreliable (t=${inUnreliable.start_tp}–${inUnreliable.end_tp})</span>`);
+    stateEl.innerHTML = parts.join(" · ");
+    stateEl.classList.toggle("unreliable", !!inUnreliable);
+
+    // Push the gizmo to the viewer for the current tp's saved axes.
+    if (state.viewer) {
+      state.viewer.setOrientationAxes({
+        ap: o?.ap_dir || null,
+        dv: o?.dv_dir || null,
+      });
+    }
   }
 
   function updateAnnotTpLabel() {
@@ -992,6 +1170,7 @@
 
     renderTimelineTicks();
     renderTimelineNotes();
+    renderTimelineOrientations();
 
     // Current-timepoint cursor.
     const tp = state.selected.timepoint;
@@ -1038,6 +1217,64 @@
         label.style.left = x + "%";
         label.textContent = String(tp);
         ticks.appendChild(label);
+      }
+    }
+  }
+
+  function renderTimelineOrientations() {
+    const root = document.getElementById("timeline-bands");
+    if (!root) return;
+    const tps = state.timepoints;
+    if (!tps.length) return;
+    const xFor = (idx) => (tps.length <= 1 ? 0 : (idx / (tps.length - 1)) * 100);
+
+    // Unreliable ranges as a translucent gray band layered over the stage band.
+    for (const r of state.annotations.unreliableRanges || []) {
+      const i0 = tps.findIndex((t) => t >= r.start_tp);
+      const i1 = (() => {
+        const idx = tps.findIndex((t) => t >= r.end_tp);
+        return idx < 0 ? tps.length - 1 : idx;
+      })();
+      if (i0 < 0 || i1 < 0) continue;
+      const band = document.createElement("div");
+      band.className = "tl-unreliable";
+      band.style.left = xFor(i0) + "%";
+      band.style.width = (xFor(i1) - xFor(i0)) + "%";
+      band.title = `unreliable: t=${r.start_tp}–${r.end_tp}`;
+      root.appendChild(band);
+    }
+
+    // AP/DV markers as small colored dots above the band, paired vertically.
+    const markers = document.getElementById("timeline-markers");
+    for (const [tp, o] of state.annotations.orientations) {
+      const idx = tps.indexOf(tp);
+      if (idx < 0) continue;
+      if (o.ap_dir) {
+        const d = document.createElement("div");
+        d.className = "tl-orient-ap";
+        d.style.left = xFor(idx) + "%";
+        d.title = `AP saved at t=${tp}`;
+        markers.appendChild(d);
+      }
+      if (o.dv_dir) {
+        const d = document.createElement("div");
+        d.className = "tl-orient-dv";
+        d.style.left = xFor(idx) + "%";
+        d.title = `DV saved at t=${tp}`;
+        markers.appendChild(d);
+      }
+    }
+
+    // Pending unreliable-range start marker (visual feedback while user
+    // is mid-range).
+    if (state.unreliableMarking) {
+      const idx = tps.indexOf(state.unreliableMarking.startTp);
+      if (idx >= 0) {
+        const d = document.createElement("div");
+        d.className = "tl-pending-unreliable";
+        d.style.left = xFor(idx) + "%";
+        d.title = `unreliable range start at t=${state.unreliableMarking.startTp}`;
+        markers.appendChild(d);
       }
     }
   }

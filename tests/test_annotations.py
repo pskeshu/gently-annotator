@@ -83,3 +83,61 @@ def test_flag_upsert_replaces(store: AnnotationStore):
     store.upsert_flag("D", "S", "E", "kesavan", excluded=True)
     store.upsert_flag("D", "S", "E", "kesavan", excluded=False)
     assert store.get_flag("D", "S", "E", "kesavan")["excluded"] == 0
+
+
+# ----- orientations -----
+
+def test_orientation_axis_independent(store: AnnotationStore):
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "ap", [0, 1, 0])
+    rows = store.list_orientations("D", "S", "E", "k")
+    assert len(rows) == 1
+    assert rows[0]["ap_dir"] == [0, 1, 0]
+    assert rows[0]["dv_dir"] is None
+    # Add DV without affecting AP.
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "dv", [1, 0, 0])
+    rows = store.list_orientations("D", "S", "E", "k")
+    assert rows[0]["ap_dir"] == [0, 1, 0]
+    assert rows[0]["dv_dir"] == [1, 0, 0]
+
+
+def test_orientation_clear_one_axis_keeps_other(store: AnnotationStore):
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "ap", [0, 1, 0])
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "dv", [1, 0, 0])
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "ap", None)
+    rows = store.list_orientations("D", "S", "E", "k")
+    assert len(rows) == 1
+    assert rows[0]["ap_dir"] is None
+    assert rows[0]["dv_dir"] == [1, 0, 0]
+
+
+def test_orientation_row_garbage_collected(store: AnnotationStore):
+    """When both axes are NULL and notes are empty, the row is removed."""
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "ap", [0, 1, 0])
+    store.upsert_orientation_axis("D", "S", "E", 10, "k", "ap", None)
+    assert store.list_orientations("D", "S", "E", "k") == []
+
+
+def test_orientation_per_annotator(store: AnnotationStore):
+    store.upsert_orientation_axis("D", "S", "E", 5, "kesavan", "ap", [1, 0, 0])
+    store.upsert_orientation_axis("D", "S", "E", 5, "trisha", "ap", [0, 1, 0])
+    k = store.list_orientations("D", "S", "E", "kesavan")
+    t = store.list_orientations("D", "S", "E", "trisha")
+    assert k[0]["ap_dir"] == [1, 0, 0]
+    assert t[0]["ap_dir"] == [0, 1, 0]
+
+
+def test_unreliable_range_add_list_delete(store: AnnotationStore):
+    rid = store.add_unreliable_range("D", "S", "E", 50, 80, "k", notes="twitching")
+    rows = store.list_unreliable_ranges("D", "S", "E", "k")
+    assert len(rows) == 1
+    assert (rows[0]["start_tp"], rows[0]["end_tp"]) == (50, 80)
+    assert rows[0]["notes"] == "twitching"
+    store.delete_unreliable_range(rid, "k")
+    assert store.list_unreliable_ranges("D", "S", "E", "k") == []
+
+
+def test_unreliable_range_swaps_start_end(store: AnnotationStore):
+    """Caller may pass them in any order; storage normalises."""
+    store.add_unreliable_range("D", "S", "E", 80, 50, "k")
+    rows = store.list_unreliable_ranges("D", "S", "E", "k")
+    assert (rows[0]["start_tp"], rows[0]["end_tp"]) == (50, 80)

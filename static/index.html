@@ -64,6 +64,29 @@
           <kbd>←</kbd>/<kbd>→</kbd> step timepoints, <kbd>n</kbd> focus notes.
         </div>
 
+        <div class="annotation-row" id="orient-row">
+          <span class="annotation-label">Orientation:</span>
+          <button id="orient-save-ap" class="orient-btn" type="button" title="Save current view's up direction as anterior (a)">
+            <span class="orient-key">A</span> Save AP
+          </button>
+          <button id="orient-save-dv" class="orient-btn" type="button" title="Save current view's up direction as dorsal (d)">
+            <span class="orient-key">D</span> Save DV
+          </button>
+          <button id="orient-clear" class="orient-btn" type="button" title="Clear AP/DV at this timepoint (o)">
+            Clear
+          </button>
+          <span class="orient-sep"></span>
+          <button id="orient-unreliable" class="orient-btn" type="button" title="Mark a range of timepoints as unreliable (u to start, u again at end)">
+            <span class="orient-key">U</span> <span id="orient-unreliable-label">Mark unreliable…</span>
+          </button>
+          <span class="annotation-spacer"></span>
+          <span id="orient-state" class="orient-state"></span>
+          <label class="orient-show">
+            <input id="orient-show-axes" type="checkbox" checked />
+            <span>show axes</span>
+          </label>
+        </div>
+
         <div id="timeline-strip">
           <div id="timeline-bands"></div>
           <div id="timeline-ticks"></div>

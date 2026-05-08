@@ -143,6 +143,8 @@
       this._cameraObjectPos = null;
       this._resizeObserver = null;
       this._mounted = false;
+      this._axisGroup = null;
+      this._axesVisible = true;
     }
 
     mount() {
@@ -277,6 +279,87 @@
       }
     }
 
+    /** Return the world "up" direction transformed into the volumeGroup's
+     *  local frame as a unit Vector3. Used to capture an orientation axis
+     *  at the moment the user clicks "Save AP/DV". */
+    captureLocalUp() {
+      if (!this.volumeGroup) return null;
+      this.volumeGroup.updateMatrixWorld(true);
+      const p1 = new THREE.Vector3(0, 0, 0);
+      const p2 = new THREE.Vector3(0, 1, 0);
+      this.volumeGroup.worldToLocal(p1);
+      this.volumeGroup.worldToLocal(p2);
+      const dir = p2.sub(p1);
+      const len = dir.length();
+      if (len < 1e-6) return null;
+      return [dir.x / len, dir.y / len, dir.z / len];
+    }
+
+    /** Replace the orientation axis gizmo. ap/dv are unit-vector arrays in
+     *  volume-local coords, or null. Children of volumeGroup so they rotate
+     *  with the volume. */
+    setOrientationAxes({ ap, dv }) {
+      if (!this.volumeGroup) return;
+      if (this._axisGroup) {
+        this.volumeGroup.remove(this._axisGroup);
+        this._axisGroup.traverse((o) => {
+          o.geometry?.dispose();
+          o.material?.dispose();
+        });
+      }
+      this._axisGroup = new THREE.Group();
+      this._axisGroup.renderOrder = 999;  // drawn after the volume
+
+      // The volume cube fits inside a unit sphere (max half-extent = 0.5),
+      // so an arrow length of ~0.7 protrudes clearly past the volume.
+      const ARROW_LEN = 0.7;
+      if (ap) this._axisGroup.add(this._makeAxisArrow(ap, "#ff5577", "A"));
+      if (dv) this._axisGroup.add(this._makeAxisArrow(dv, "#56d364", "D"));
+      // LR derived only when both AP and DV are known.
+      if (ap && dv) {
+        const apV = new THREE.Vector3(...ap);
+        const dvV = new THREE.Vector3(...dv);
+        const lr = new THREE.Vector3().crossVectors(apV, dvV).normalize();
+        this._axisGroup.add(
+          this._makeAxisArrow([lr.x, lr.y, lr.z], "#79c0ff", "L")
+        );
+      }
+      this.volumeGroup.add(this._axisGroup);
+      this._axisGroup.visible = !!this._axesVisible;
+    }
+
+    setAxesVisible(v) {
+      this._axesVisible = !!v;
+      if (this._axisGroup) this._axisGroup.visible = this._axesVisible;
+    }
+
+    _makeAxisArrow(dir, color, label) {
+      const g = new THREE.Group();
+      const ARROW_LEN = 0.7;
+      const TIP_LEN = 0.08;
+      const TIP_RADIUS = 0.03;
+      const v = new THREE.Vector3(...dir).normalize();
+      // Shaft: line from origin → ARROW_LEN*v
+      const shaftGeo = new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(0, 0, 0),
+        v.clone().multiplyScalar(ARROW_LEN - TIP_LEN),
+      ]);
+      const shaftMat = new THREE.LineBasicMaterial({ color, linewidth: 2, depthTest: false, transparent: true, opacity: 0.95 });
+      g.add(new THREE.Line(shaftGeo, shaftMat));
+
+      // Tip: cone pointing along v at the end of the shaft.
+      const coneGeo = new THREE.ConeGeometry(TIP_RADIUS, TIP_LEN, 12);
+      const coneMat = new THREE.MeshBasicMaterial({ color, depthTest: false, transparent: true, opacity: 0.95 });
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.copy(v).multiplyScalar(ARROW_LEN - TIP_LEN / 2);
+      // Three.js cones point along +Y by default; rotate so the +Y axis aligns with v.
+      const yAxis = new THREE.Vector3(0, 1, 0);
+      cone.quaternion.setFromUnitVectors(yAxis, v);
+      g.add(cone);
+      g.userData.label = label;
+      return g;
+    }
+
     resetView() {
       this.savedRotation = { x: -0.5, y: 0.5 };
       this.savedZoom = 0.9;
@@ -375,6 +458,13 @@
     dispose() {
       if (this.animationId) cancelAnimationFrame(this.animationId);
       this._disposeVolume();
+      if (this._axisGroup) {
+        this._axisGroup.traverse((o) => {
+          o.geometry?.dispose();
+          o.material?.dispose();
+        });
+        this._axisGroup = null;
+      }
       if (this._resizeObserver) this._resizeObserver.disconnect();
       if (this.renderer) {
         this.renderer.dispose();

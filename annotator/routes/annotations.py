@@ -69,6 +69,19 @@ class FlagBody(BaseModel):
     notes: Optional[str] = None
 
 
+class OrientationBody(BaseModel):
+    annotator: str
+    axis: str  # 'ap' or 'dv'
+    direction: Optional[list[float]] = None  # null clears it; else unit vector
+
+
+class UnreliableRangeBody(BaseModel):
+    annotator: str
+    start_tp: int
+    end_tp: int
+    notes: Optional[str] = None
+
+
 # ---- routes ----
 
 @router.get("/{dataset}/{session}/{embryo}")
@@ -88,6 +101,8 @@ async def get_bundle(
     transitions = store.list_transitions(dataset, session, embryo, name)
     notes = store.list_notes(dataset, session, embryo, name)
     flag = store.get_flag(dataset, session, embryo, name)
+    orientations = store.list_orientations(dataset, session, embryo, name)
+    unreliable = store.list_unreliable_ranges(dataset, session, embryo, name)
     return {
         "dataset": dataset,
         "session": session,
@@ -97,6 +112,8 @@ async def get_bundle(
         "transitions": transitions,
         "notes": notes,
         "flag": flag,
+        "orientations": orientations,
+        "unreliable_ranges": unreliable,
     }
 
 
@@ -176,4 +193,79 @@ async def upsert_flag(
     _check_path(catalog, dataset, session, embryo)
     name = _require_annotator(body.annotator)
     store.upsert_flag(dataset, session, embryo, name, body.excluded, body.notes)
+    return {"ok": True}
+
+
+# ---- orientation ----
+
+@router.post("/{dataset}/{session}/{embryo}/orientation/{timepoint}")
+async def upsert_orientation(
+    dataset: str,
+    session: str,
+    embryo: str,
+    timepoint: int,
+    body: OrientationBody,
+    request: Request,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(body.annotator)
+    if body.axis not in ("ap", "dv"):
+        raise HTTPException(status_code=400, detail=f"Unknown axis {body.axis!r}")
+    store.upsert_orientation_axis(
+        dataset, session, embryo, timepoint, name, body.axis, body.direction
+    )
+    return {"ok": True}
+
+
+@router.delete("/{dataset}/{session}/{embryo}/orientation/{timepoint}")
+async def clear_orientation(
+    dataset: str,
+    session: str,
+    embryo: str,
+    timepoint: int,
+    request: Request,
+    annotator: Optional[str] = None,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(annotator)
+    store.clear_orientation(dataset, session, embryo, timepoint, name)
+    return {"ok": True}
+
+
+@router.post("/{dataset}/{session}/{embryo}/unreliable")
+async def add_unreliable(
+    dataset: str,
+    session: str,
+    embryo: str,
+    body: UnreliableRangeBody,
+    request: Request,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(body.annotator)
+    rid = store.add_unreliable_range(
+        dataset, session, embryo, body.start_tp, body.end_tp, name, body.notes
+    )
+    return {"ok": True, "id": rid}
+
+
+@router.delete("/{dataset}/{session}/{embryo}/unreliable/{range_id}")
+async def delete_unreliable(
+    dataset: str,
+    session: str,
+    embryo: str,
+    range_id: int,
+    request: Request,
+    annotator: Optional[str] = None,
+):
+    catalog = request.app.state.catalog
+    store = request.app.state.store
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(annotator)
+    store.delete_unreliable_range(range_id, name)
     return {"ok": True}

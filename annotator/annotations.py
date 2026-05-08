@@ -61,6 +61,43 @@ CREATE TABLE IF NOT EXISTS timepoint_notes (
 );
 CREATE INDEX IF NOT EXISTS idx_timepoint_notes_lookup
   ON timepoint_notes(dataset, session, embryo, annotator);
+
+-- Per-timepoint body-axis orientation (anterior-posterior, dorsal-ventral).
+-- ap_dir / dv_dir are JSON [x, y, z] unit vectors in volume-local
+-- coordinates. Either may be NULL — annotators can save one axis
+-- without the other.
+CREATE TABLE IF NOT EXISTS orientations (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  dataset     TEXT    NOT NULL,
+  session     TEXT    NOT NULL,
+  embryo      TEXT    NOT NULL,
+  timepoint   INTEGER NOT NULL,
+  ap_dir      TEXT,
+  dv_dir      TEXT,
+  annotator   TEXT    NOT NULL,
+  notes       TEXT,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE(dataset, session, embryo, timepoint, annotator)
+);
+CREATE INDEX IF NOT EXISTS idx_orientations_lookup
+  ON orientations(dataset, session, embryo, annotator);
+
+-- Closed [start_tp, end_tp] ranges where the annotator declared the
+-- orientation unreliable (twitching, ambiguity, occlusion, etc.).
+CREATE TABLE IF NOT EXISTS orientation_unreliable_ranges (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  dataset     TEXT    NOT NULL,
+  session     TEXT    NOT NULL,
+  embryo      TEXT    NOT NULL,
+  start_tp    INTEGER NOT NULL,
+  end_tp      INTEGER NOT NULL,
+  annotator   TEXT    NOT NULL,
+  notes       TEXT,
+  updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  CHECK (end_tp >= start_tp)
+);
+CREATE INDEX IF NOT EXISTS idx_orient_unreliable_lookup
+  ON orientation_unreliable_ranges(dataset, session, embryo, annotator);
 """
 
 
@@ -250,6 +287,145 @@ class AnnotationStore:
                   AND timepoint=? AND annotator=?
                 """,
                 (dataset, session, embryo, timepoint, annotator),
+            )
+
+    # ---- orientation: AP / DV per-timepoint ----
+
+    def upsert_orientation_axis(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        timepoint: int,
+        annotator: str,
+        axis: str,
+        direction: list[float] | None,
+    ) -> None:
+        """Set or clear ONE axis (ap or dv) at a timepoint.
+
+        If `direction` is None the column is set to NULL. If both columns end
+        up NULL (and notes is empty) we delete the row to keep the table clean.
+        """
+        if axis not in ("ap", "dv"):
+            raise ValueError(f"axis must be 'ap' or 'dv', got {axis!r}")
+        col = "ap_dir" if axis == "ap" else "dv_dir"
+        import json as _json
+        value = _json.dumps(direction) if direction is not None else None
+
+        with self._conn() as c:
+            c.execute(
+                f"""
+                INSERT INTO orientations
+                  (dataset, session, embryo, timepoint, annotator, {col}, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(dataset, session, embryo, timepoint, annotator)
+                DO UPDATE SET
+                  {col}      = excluded.{col},
+                  updated_at = CURRENT_TIMESTAMP
+                """,
+                (dataset, session, embryo, timepoint, annotator, value),
+            )
+            # Garbage-collect rows that no longer carry data.
+            c.execute(
+                """
+                DELETE FROM orientations
+                WHERE dataset=? AND session=? AND embryo=? AND timepoint=? AND annotator=?
+                  AND ap_dir IS NULL AND dv_dir IS NULL
+                  AND (notes IS NULL OR notes = '')
+                """,
+                (dataset, session, embryo, timepoint, annotator),
+            )
+
+    def list_orientations(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        annotator: str,
+    ) -> list[dict]:
+        import json as _json
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT * FROM orientations
+                WHERE dataset=? AND session=? AND embryo=? AND annotator=?
+                ORDER BY timepoint
+                """,
+                (dataset, session, embryo, annotator),
+            ).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["ap_dir"] = _json.loads(d["ap_dir"]) if d["ap_dir"] else None
+            d["dv_dir"] = _json.loads(d["dv_dir"]) if d["dv_dir"] else None
+            out.append(d)
+        return out
+
+    def clear_orientation(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        timepoint: int,
+        annotator: str,
+    ) -> None:
+        with self._conn() as c:
+            c.execute(
+                """
+                DELETE FROM orientations
+                WHERE dataset=? AND session=? AND embryo=? AND timepoint=? AND annotator=?
+                """,
+                (dataset, session, embryo, timepoint, annotator),
+            )
+
+    # ---- orientation: unreliable ranges ----
+
+    def add_unreliable_range(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        start_tp: int,
+        end_tp: int,
+        annotator: str,
+        notes: str | None = None,
+    ) -> int:
+        if end_tp < start_tp:
+            start_tp, end_tp = end_tp, start_tp
+        with self._conn() as c:
+            cur = c.execute(
+                """
+                INSERT INTO orientation_unreliable_ranges
+                  (dataset, session, embryo, start_tp, end_tp, annotator, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (dataset, session, embryo, start_tp, end_tp, annotator, notes),
+            )
+            return cur.lastrowid
+
+    def list_unreliable_ranges(
+        self,
+        dataset: str,
+        session: str,
+        embryo: str,
+        annotator: str,
+    ) -> list[dict]:
+        with self._conn() as c:
+            rows = c.execute(
+                """
+                SELECT * FROM orientation_unreliable_ranges
+                WHERE dataset=? AND session=? AND embryo=? AND annotator=?
+                ORDER BY start_tp
+                """,
+                (dataset, session, embryo, annotator),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def delete_unreliable_range(self, range_id: int, annotator: str) -> None:
+        with self._conn() as c:
+            c.execute(
+                "DELETE FROM orientation_unreliable_ranges WHERE id=? AND annotator=?",
+                (range_id, annotator),
             )
 
     # ---- summary across all of one annotator's work ----

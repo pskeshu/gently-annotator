@@ -557,6 +557,79 @@ html, body {
   color: var(--accent-2);
 }
 
+/* orientation row */
+.orient-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.orient-btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.orient-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.orient-btn .orient-key {
+  color: var(--text-2);
+  font-size: 9px;
+  font-weight: 700;
+  margin-right: 4px;
+}
+
+.orient-btn.has-ap {
+  border-color: #ff5577;
+  background: rgba(255, 85, 119, 0.08);
+}
+
+.orient-btn.has-dv {
+  border-color: #56d364;
+  background: rgba(86, 211, 100, 0.08);
+}
+
+.orient-btn.recording {
+  border-color: var(--warn);
+  background: rgba(240, 136, 62, 0.12);
+  color: var(--warn);
+  animation: bakePulse 1.4s ease-in-out infinite;
+}
+
+.orient-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 4px;
+}
+
+.orient-state {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.orient-state.has-ap, .orient-state .ap { color: #ff5577; }
+.orient-state.has-dv, .orient-state .dv { color: #56d364; }
+.orient-state.unreliable { color: var(--warn); }
+
+.orient-show {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
 /* exclude checkbox */
 .exclude-checkbox {
   display: flex;
@@ -625,6 +698,46 @@ html, body {
   background: var(--accent-2);
   transform: translateX(-4px);
   box-shadow: 0 0 0 1px rgba(13, 17, 23, 0.85);
+}
+
+.tl-orient-ap, .tl-orient-dv, .tl-pending-unreliable {
+  position: absolute;
+  width: 4px;
+  height: 6px;
+  transform: translateX(-2px);
+}
+
+.tl-orient-ap {
+  top: 4px;
+  background: #ff5577;
+}
+
+.tl-orient-dv {
+  top: 11px;
+  background: #56d364;
+}
+
+.tl-pending-unreliable {
+  top: 0;
+  height: 100%;
+  width: 2px;
+  background: var(--warn);
+  box-shadow: 0 0 4px var(--warn);
+  animation: bakePulse 1s ease-in-out infinite;
+}
+
+.tl-unreliable {
+  position: absolute;
+  top: 18px;
+  bottom: 28px;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(240, 136, 62, 0.5),
+    rgba(240, 136, 62, 0.5) 6px,
+    rgba(240, 136, 62, 0.2) 6px,
+    rgba(240, 136, 62, 0.2) 12px
+  );
+  pointer-events: none;
 }
 
 /* Tick marks + labels along the bottom of the strip. */

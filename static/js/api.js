@@ -131,6 +131,44 @@ const API = {
     if (!r.ok) throw new Error(`upsertFlag: ${r.status}`);
     return r.json();
   },
+
+  async upsertOrientationAxis(dataset, session, embryo, timepoint, { annotator, axis, direction }) {
+    const r = await fetch(`${this._annPath(dataset, session, embryo)}/orientation/${timepoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ annotator, axis, direction }),
+    });
+    if (!r.ok) throw new Error(`upsertOrientationAxis: ${r.status}`);
+    return r.json();
+  },
+
+  async clearOrientation(dataset, session, embryo, timepoint, annotator) {
+    const r = await fetch(
+      `${this._annPath(dataset, session, embryo)}/orientation/${timepoint}?annotator=${encodeURIComponent(annotator)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) throw new Error(`clearOrientation: ${r.status}`);
+    return r.json();
+  },
+
+  async addUnreliableRange(dataset, session, embryo, { annotator, start_tp, end_tp, notes = null }) {
+    const r = await fetch(`${this._annPath(dataset, session, embryo)}/unreliable`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ annotator, start_tp, end_tp, notes }),
+    });
+    if (!r.ok) throw new Error(`addUnreliableRange: ${r.status}`);
+    return r.json();
+  },
+
+  async deleteUnreliableRange(dataset, session, embryo, range_id, annotator) {
+    const r = await fetch(
+      `${this._annPath(dataset, session, embryo)}/unreliable/${range_id}?annotator=${encodeURIComponent(annotator)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) throw new Error(`deleteUnreliableRange: ${r.status}`);
+    return r.json();
+  },
 };
 
 window.API = API;
