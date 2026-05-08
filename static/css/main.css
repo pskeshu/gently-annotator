@@ -603,6 +603,16 @@ html, body {
   animation: bakePulse 1.4s ease-in-out infinite;
 }
 
+.orient-btn.removing {
+  border-color: var(--bad);
+  background: rgba(248, 81, 73, 0.12);
+  color: var(--bad);
+}
+
+.orient-btn.removing:hover {
+  background: rgba(248, 81, 73, 0.25);
+}
+
 .orient-sep {
   width: 1px;
   height: 18px;

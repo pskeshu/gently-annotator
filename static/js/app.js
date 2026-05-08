@@ -923,18 +923,35 @@
     }
   }
 
+  /** The current state of the unreliable-button does triple duty:
+   *   - if the current timepoint is INSIDE an existing range, the button
+   *     becomes "Remove range" and clicking deletes it.
+   *   - if the user is mid-marking (one endpoint pinned), the button
+   *     completes the range using the current timepoint.
+   *   - otherwise, the button starts a new range with this tp as the start.
+   */
   async function toggleUnreliableMark() {
     if (!requireAnnotatorOrPrompt()) return;
     const tp = state.selected.timepoint;
     if (tp == null) return;
 
+    // Mode 1: clicking while inside an existing range removes it.
+    const containing = (state.annotations.unreliableRanges || []).find(
+      (r) => tp >= r.start_tp && tp <= r.end_tp
+    );
+    if (containing && !state.unreliableMarking) {
+      await deleteUnreliableRange(containing.id);
+      return;
+    }
+
     if (!state.unreliableMarking) {
-      // First click — pin a start.
+      // Mode 3: pin a start.
       state.unreliableMarking = { startTp: tp };
       renderAnnotationUI();
       return;
     }
-    // Second click — commit a range from {startTp, current tp}.
+
+    // Mode 2: commit a range from the pinned start to current tp.
     const { dataset, session, embryo } = state.selected;
     const startTp = state.unreliableMarking.startTp;
     state.unreliableMarking = null;
@@ -1027,18 +1044,23 @@
     apBtn.classList.toggle("has-ap", !!(o && o.ap_dir));
     dvBtn.classList.toggle("has-dv", !!(o && o.dv_dir));
 
-    if (state.unreliableMarking) {
-      unrelBtn.classList.add("recording");
-      unrelLabel.textContent = `Set range end (start t=${state.unreliableMarking.startTp})`;
-    } else {
-      unrelBtn.classList.remove("recording");
-      unrelLabel.textContent = "Mark unreliable…";
-    }
-
-    // Status text on the right.
     const inUnreliable = (state.annotations.unreliableRanges || []).find(
       (r) => tp >= r.start_tp && tp <= r.end_tp
     );
+
+    unrelBtn.classList.remove("recording", "removing");
+    if (state.unreliableMarking) {
+      unrelBtn.classList.add("recording");
+      unrelLabel.textContent = `Set range end (start t=${state.unreliableMarking.startTp})`;
+      unrelBtn.title = "Click again to commit the unreliable range, or press Esc to cancel.";
+    } else if (inUnreliable) {
+      unrelBtn.classList.add("removing");
+      unrelLabel.textContent = `Remove range t=${inUnreliable.start_tp}–${inUnreliable.end_tp}`;
+      unrelBtn.title = `Delete this unreliable range.`;
+    } else {
+      unrelLabel.textContent = "Mark unreliable…";
+      unrelBtn.title = "Mark a range of timepoints as unreliable (u to start, u again at end)";
+    }
     const parts = [];
     if (o && o.ap_dir) parts.push('<span class="ap">AP set</span>');
     if (o && o.dv_dir) parts.push('<span class="dv">DV set</span>');
