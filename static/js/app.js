@@ -898,7 +898,13 @@
     if (!requireAnnotatorOrPrompt()) return;
     const tp = state.selected.timepoint;
     if (tp == null || !state.viewer) return;
-    const dir = state.viewer.captureLocalUp();
+    // Conventions:
+    //   AP (anterior-posterior) — anterior is the LEFT of the screen.
+    //     The user lays the embryo out horizontally, head on the left.
+    //   DV (dorsal-ventral)     — dorsal is the TOP of the screen.
+    const dir = axis === "ap"
+      ? state.viewer.captureLocalLeft()
+      : state.viewer.captureLocalUp();
     if (!dir) {
       setStatus("Could not capture orientation (viewer not ready).", true);
       return;

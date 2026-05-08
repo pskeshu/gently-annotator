@@ -304,20 +304,29 @@
       }
     }
 
-    /** Return the world "up" direction transformed into the volumeGroup's
-     *  local frame as a unit Vector3. Used to capture an orientation axis
-     *  at the moment the user clicks "Save AP/DV". */
-    captureLocalUp() {
+    /** Capture an arbitrary world-space direction transformed into
+     *  volumeGroup-local coordinates as a unit vector. */
+    captureLocalDir(worldX, worldY, worldZ) {
       if (!this.volumeGroup) return null;
       this.volumeGroup.updateMatrixWorld(true);
       const p1 = new THREE.Vector3(0, 0, 0);
-      const p2 = new THREE.Vector3(0, 1, 0);
+      const p2 = new THREE.Vector3(worldX, worldY, worldZ);
       this.volumeGroup.worldToLocal(p1);
       this.volumeGroup.worldToLocal(p2);
       const dir = p2.sub(p1);
       const len = dir.length();
       if (len < 1e-6) return null;
       return [dir.x / len, dir.y / len, dir.z / len];
+    }
+
+    /** Convenience: world "up" → local. (DV convention: dorsal = screen top.) */
+    captureLocalUp() {
+      return this.captureLocalDir(0, 1, 0);
+    }
+
+    /** Convenience: world "left" → local. (AP convention: anterior = screen left.) */
+    captureLocalLeft() {
+      return this.captureLocalDir(-1, 0, 0);
     }
 
     /** Replace the orientation axis gizmo. ap/dv are unit-vector arrays in
