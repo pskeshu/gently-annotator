@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gently Annotator</title>
+  <link rel="stylesheet" href="/static/css/main.css" />
+  <!-- Three.js r128 (matches gently's viz server). r128 still has THREE.DataTexture3D. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="app">
+    <aside id="sidebar">
+      <header class="sidebar-header">
+        <h1>Gently Annotator</h1>
+        <div id="annotator-section" class="annotator-row"></div>
+      </header>
+      <nav id="catalog"></nav>
+    </aside>
+
+    <main id="main">
+      <header id="main-header">
+        <span id="breadcrumb" class="breadcrumb"></span>
+        <span id="timepoint-info" class="timepoint-info"></span>
+      </header>
+
+      <section id="viewer-section">
+        <div id="viewer-controls">
+          <div class="control">
+            <label>Threshold</label>
+            <input id="threshold" type="range" min="0" max="100" value="30" />
+            <span id="threshold-val">0.30</span>
+          </div>
+          <div class="control">
+            <label>Contrast</label>
+            <input id="contrast" type="range" min="50" max="300" value="100" />
+            <span id="contrast-val">1.0</span>
+          </div>
+          <div class="control timepoint">
+            <button id="prev-tp" title="Previous timepoint (←)">◀</button>
+            <span id="tp-readout">—</span>
+            <button id="next-tp" title="Next timepoint (→)">▶</button>
+          </div>
+          <span class="hint">Drag: rotate · Shift+Drag: roll · Scroll: zoom · Double-click: reset</span>
+        </div>
+        <div id="viewer-3d"></div>
+        <div id="viewer-status" class="viewer-status"></div>
+      </section>
+
+      <section id="annotation-section">
+        <div class="annotation-row" id="stage-row">
+          <span class="annotation-label">Stage at <span id="annot-tp-label">—</span>:</span>
+          <div id="stage-buttons"></div>
+          <span class="annotation-spacer"></span>
+          <label class="exclude-checkbox" id="exclude-label">
+            <input type="checkbox" id="exclude-input" />
+            <span>exclude embryo</span>
+          </label>
+        </div>
+
+        <div class="annotation-hint">
+          Click a stage to mark this timepoint as its start. Click the same stage again
+          (or press <kbd>⌫</kbd>) to remove. <kbd>1</kbd>–<kbd>7</kbd> mark stages,
+          <kbd>←</kbd>/<kbd>→</kbd> step timepoints, <kbd>n</kbd> focus notes.
+        </div>
+
+        <div id="timeline-strip">
+          <div id="timeline-bands"></div>
+          <div id="timeline-ticks"></div>
+          <div id="timeline-markers"></div>
+          <div id="timeline-notes"></div>
+          <div id="timeline-cursor"></div>
+        </div>
+
+        <div class="annotation-row" id="notes-row">
+          <label for="notes-textarea" class="annotation-label">Notes:</label>
+          <textarea id="notes-textarea" rows="6"
+                    placeholder="optional morphology notes (auto-saves)"></textarea>
+          <span id="notes-status" class="notes-status"></span>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/viewer.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+host: 127.0.0.1
+port: 8090
+
+# Each dataset has an ordered list of roots. The first one that exists is used,
+# so the D: copy takes precedence once it finishes; nearline is the fallback.
+datasets:
+  Gently:
+    schema: v1   # images/{session}/embryo_N_tNNNN[_TIMESTAMP].tif
+    roots:
+      - D:\Kesavan\latest\Kesavan\Gently
+      - \\nearline.hhmi.org\shroff\shrofflab\Collaborators\Kesavan\Gently
+  Gently2:
+    schema: v2   # volumes/{session}/embryo_N_tNNNN.tif
+    roots:
+      - D:\Kesavan\latest\Kesavan\Gently2
+      - \\nearline.hhmi.org\shroff\shrofflab\Collaborators\Kesavan\Gently2
+
+stages:
+  - early
+  - bean
+  - comma
+  - 1.5fold
+  - 2fold
+  - pretzel
+  - hatched
+
+# Default voxel size [dz, dy, dx] in microns for diSPIM. Matches
+# gently.core.imaging.projection_three_view: 1.0 um Z step, 6.5 um camera
+# pixel / 40x SPIM objective = 0.1625 um in XY.
+voxel_size_um: [1.0, 0.1625, 0.1625]
+
+# In-memory LRU cache of normalized uint8 volumes (each ~50 MB for v1).
+cache:
+  max_volumes: 8

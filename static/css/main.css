@@ -1,0 +1,690 @@
+:root {
+  --bg: #0d1117;
+  --bg-2: #161b22;
+  --bg-3: #1f242c;
+  --border: #30363d;
+  --text: #c9d1d9;
+  --text-2: #8b949e;
+  --accent: #58a6ff;
+  --accent-2: #79c0ff;
+  --warn: #f0883e;
+  --bad: #f85149;
+  --good: #56d364;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
+  height: 100%;
+  overflow: hidden;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  height: 100vh;
+}
+
+/* ---- sidebar ---- */
+#sidebar {
+  background: var(--bg-2);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.sidebar-header {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-3);
+}
+
+.sidebar-header h1 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--accent-2);
+}
+
+.annotator-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  min-height: 24px;
+}
+
+.annotator-row label,
+.annotator-row .annotator-label {
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.annotator-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 4px 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  border-radius: 3px;
+}
+
+.annotator-row input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.annotator-row #annotator-save {
+  background: var(--accent);
+  color: #0d1117;
+  border: none;
+  padding: 4px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.annotator-row #annotator-save:hover {
+  background: var(--accent-2);
+}
+
+.annotator-chip {
+  background: rgba(88, 166, 255, 0.15);
+  border: 1px solid rgba(88, 166, 255, 0.4);
+  color: var(--accent-2);
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 0.6s ease, border-color 0.6s ease;
+}
+
+.annotator-chip.saved {
+  background: rgba(86, 211, 100, 0.22);
+  border-color: rgba(86, 211, 100, 0.65);
+  color: var(--good);
+}
+
+.link-btn {
+  background: none;
+  border: none;
+  color: var(--text-2);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  text-decoration: underline;
+  font-family: var(--mono);
+}
+
+.link-btn:hover {
+  color: var(--accent);
+}
+
+#catalog {
+  flex: 1;
+  padding: 8px 4px;
+}
+
+.cat-item {
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.cat-dataset {
+  margin: 8px 0 2px;
+  padding: 4px 8px;
+  color: var(--accent-2);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+}
+
+.cat-dataset.unavailable {
+  color: var(--text-2);
+  opacity: 0.6;
+}
+
+.cat-row {
+  display: flex;
+  align-items: center;
+  padding: 3px 8px 3px 16px;
+  cursor: pointer;
+  border-left: 2px solid transparent;
+  user-select: none;
+}
+
+.cat-row:hover { background: var(--bg-3); }
+
+.cat-row.expanded { background: var(--bg-3); border-left-color: var(--accent); }
+.cat-row.selected {
+  background: rgba(88, 166, 255, 0.18);
+  border-left-color: var(--accent);
+  color: var(--accent-2);
+}
+
+.cat-row.session { padding-left: 24px; }
+.cat-row.embryo { padding-left: 36px; }
+
+.cat-caret {
+  display: inline-block;
+  width: 12px;
+  color: var(--text-2);
+}
+
+.cat-label { flex: 1; }
+
+.cat-meta {
+  color: var(--text-2);
+  font-size: 11px;
+  margin-left: 8px;
+}
+
+.cat-annot {
+  color: var(--good);
+  font-size: 10px;
+  margin-left: 6px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.cat-row.session.has-annotations {
+  border-left-color: var(--good);
+}
+
+.cat-badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 6px;
+}
+
+.cat-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 8px;
+  background: rgba(86, 211, 100, 0.15);
+  color: var(--good);
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.cat-badge.notes {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent-2);
+}
+
+.cat-badge.bad {
+  background: rgba(248, 81, 73, 0.18);
+  color: var(--bad);
+}
+
+.cat-row.embryo.has-annotations {
+  border-left-color: var(--good);
+}
+
+.cat-row.embryo.excluded .cat-label {
+  color: var(--bad);
+  text-decoration: line-through;
+  text-decoration-color: rgba(248, 81, 73, 0.5);
+}
+
+.cat-empty {
+  padding: 8px 16px;
+  color: var(--text-2);
+  font-style: italic;
+}
+
+.cat-hidden-note {
+  padding: 4px 16px 6px 24px;
+  color: var(--text-2);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.cat-hidden-note .show-empty-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.cat-hidden-note .show-empty-link:hover {
+  text-decoration: underline;
+}
+
+.cat-row.session.empty {
+  opacity: 0.5;
+}
+
+.cat-row.session.empty .cat-meta {
+  color: var(--warn);
+}
+
+/* ---- main ---- */
+#main {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+#main-header {
+  padding: 10px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.breadcrumb { color: var(--text-2); }
+.breadcrumb b { color: var(--accent-2); }
+
+.timepoint-info {
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+#viewer-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+#viewer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 18px;
+  padding: 10px 16px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+}
+
+.control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.control label {
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.control input[type=range] {
+  width: 90px;
+  accent-color: var(--accent);
+}
+
+.control span {
+  font-family: var(--mono);
+  min-width: 30px;
+  color: var(--accent-2);
+}
+
+.control.timepoint button {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  border-radius: 3px;
+}
+
+.control.timepoint button:hover:not(:disabled) {
+  background: var(--bg);
+  border-color: var(--accent);
+  color: var(--accent-2);
+}
+
+.control.timepoint button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+#tp-readout {
+  font-family: var(--mono);
+  min-width: 56px;
+  text-align: center;
+  color: var(--accent-2);
+}
+
+.hint {
+  margin-left: auto;
+  color: var(--text-2);
+  font-size: 11px;
+  font-family: var(--mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+/* Hint is informational; drop it when there's no room. */
+@media (max-width: 1100px) {
+  .hint { display: none; }
+}
+
+#viewer-3d {
+  flex: 1;
+  background: #000;
+  position: relative;
+  overflow: hidden;
+  min-height: 0;
+}
+
+#viewer-3d canvas { display: block; }
+
+.viewer-status {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--mono);
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: center;
+  pointer-events: none;
+  white-space: pre-line;
+}
+
+.viewer-status.error { color: var(--bad); }
+
+/* ---- annotation section (Phase 3) ---- */
+#annotation-section {
+  background: var(--bg-2);
+  border-top: 1px solid var(--border);
+  padding: 12px 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.annotation-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+
+.annotation-label {
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+#annot-tp-label {
+  color: var(--accent-2);
+}
+
+.annotation-spacer {
+  flex: 1;
+  min-width: 8px;
+}
+
+/* stage buttons */
+#stage-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.stage-btn {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 4px 9px;
+  border-radius: 3px;
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  transition: background 0.1s ease, border-color 0.1s ease;
+}
+
+.stage-btn .stage-key {
+  color: var(--text-2);
+  font-size: 9px;
+  margin-right: 4px;
+  font-weight: 700;
+}
+
+.stage-btn:hover {
+  border-color: var(--accent);
+}
+
+.stage-btn.has-marker {
+  border-color: rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* `current` = the interpolated stage at the current timepoint. Filled with
+   the stage's color but no special border — purely informational. */
+.stage-btn.current {
+  background: var(--stage-color, var(--accent));
+  border-color: var(--stage-color, var(--accent));
+  color: #0d1117;
+  font-weight: 600;
+}
+
+.stage-btn.current .stage-key {
+  color: rgba(13, 17, 23, 0.55);
+}
+
+/* `marked-here` = THIS stage's transition marker is pinned to the current
+   timepoint. Re-clicking removes it; the ✕ indicator + extra outline make
+   the remove action obvious. */
+.stage-btn.marked-here {
+  background: var(--stage-color, var(--accent));
+  border-color: #fff;
+  color: #0d1117;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18);
+}
+
+.stage-btn.marked-here .stage-key {
+  color: rgba(13, 17, 23, 0.55);
+}
+
+.stage-btn.marked-here:hover {
+  background: var(--bad);
+  border-color: var(--bad);
+}
+
+.stage-btn.disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.annotation-hint {
+  font-size: 11px;
+  color: var(--text-2);
+  font-family: var(--mono);
+  line-height: 1.5;
+  margin-top: -4px;
+}
+
+.annotation-hint kbd {
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 5px;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent-2);
+}
+
+/* exclude checkbox */
+.exclude-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text-2);
+}
+
+.exclude-checkbox input { accent-color: var(--bad); }
+
+.exclude-checkbox.active {
+  color: var(--bad);
+}
+
+/* timeline strip */
+#timeline-strip {
+  position: relative;
+  height: 84px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  cursor: pointer;
+  user-select: none;
+}
+
+#timeline-bands,
+#timeline-ticks,
+#timeline-markers,
+#timeline-notes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* Stage colored band — sits in the middle of the strip with room above for
+   transition triangles and below for the tick axis + note dots. */
+.tl-band {
+  position: absolute;
+  top: 18px;
+  bottom: 28px;
+  opacity: 0.85;
+}
+
+.tl-marker {
+  position: absolute;
+  top: 4px;
+  width: 0;
+  height: 0;
+  border-left: 6px solid transparent;
+  border-right: 6px solid transparent;
+  border-top: 10px solid var(--marker-color, #fff);
+  transform: translateX(-6px);
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.7));
+}
+
+.tl-note {
+  position: absolute;
+  bottom: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  transform: translateX(-4px);
+  box-shadow: 0 0 0 1px rgba(13, 17, 23, 0.85);
+}
+
+/* Tick marks + labels along the bottom of the strip. */
+.tl-tick {
+  position: absolute;
+  width: 1px;
+  background: rgba(201, 209, 217, 0.25);
+  top: 18px;
+  bottom: 16px;
+}
+
+.tl-tick.major {
+  background: rgba(201, 209, 217, 0.55);
+}
+
+.tl-tick-label {
+  position: absolute;
+  bottom: 1px;
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-2);
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+
+#timeline-cursor {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: rgba(255, 255, 255, 0.9);
+  transform: translateX(-1px);
+  pointer-events: none;
+  box-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+#timeline-strip.disabled { cursor: default; opacity: 0.45; }
+
+/* notes textarea */
+#notes-row {
+  align-items: flex-start;
+}
+
+#notes-textarea {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 110px;
+  max-height: 320px;
+}
+
+#notes-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+#notes-textarea:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.notes-status {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  min-width: 55px;
+  text-align: right;
+}
+
+.notes-status.saving { color: var(--warn); }
+.notes-status.saved  { color: var(--good); }
+.notes-status.error  { color: var(--bad); }
