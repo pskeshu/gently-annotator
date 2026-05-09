@@ -24,7 +24,12 @@ from .preview_cache import cache_path_for, is_complete as sidecar_is_complete
 logger = logging.getLogger(__name__)
 
 
-def _bake_one(tif_path: str, cache_path: str, voxel_size_um: list[float]) -> str:
+def _bake_one(
+    tif_path: str,
+    cache_path: str,
+    voxel_size_um: list[float],
+    z_blur_sigma: float = 1.0,
+) -> str:
     """Worker entry point — pickled and sent to a child process.
 
     Imports happen inside so the worker module is self-contained on Windows
@@ -41,7 +46,7 @@ def _bake_one(tif_path: str, cache_path: str, voxel_size_um: list[float]) -> str
 
     vol = load_volume(_Path(tif_path))
     vol = preprocess(vol)
-    vol_uint8 = normalize_for_3d(vol)
+    vol_uint8 = normalize_for_3d(vol, z_blur_sigma=z_blur_sigma)
     write_sidecar(cp, vol_uint8, voxel_size_um)
     return str(cp)
 
@@ -98,9 +103,12 @@ class PreBakeManager:
             self._already_complete = already
             self._futures = []
 
+            from .volume_io import z_blur_sigma_for_session
+            sigma = z_blur_sigma_for_session(session)
+
             for tif_path, cache_path in jobs:
                 f = self._executor.submit(
-                    _bake_one, tif_path, cache_path, self.voxel_size_um
+                    _bake_one, tif_path, cache_path, self.voxel_size_um, sigma
                 )
                 f.add_done_callback(self._on_done)
                 self._futures.append(f)

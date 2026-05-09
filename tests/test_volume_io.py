@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from annotator.volume_io import preprocess
+from annotator.volume_io import preprocess, z_blur_sigma_for_session
 
 
 def _make_vol(z=4, y=8, x=16, dtype=np.int32) -> np.ndarray:
@@ -60,3 +60,14 @@ def test_preprocess_rejects_non_3d():
     vol = np.zeros((4, 4), dtype=np.int32)
     with pytest.raises(ValueError):
         preprocess(vol)
+
+
+def test_z_blur_sigma_for_session_default_is_one():
+    assert z_blur_sigma_for_session("0a288534") == 1.0
+    assert z_blur_sigma_for_session("any_other_name") == 1.0
+
+
+def test_z_blur_sigma_for_session_deabe_is_zero():
+    """DeAbe-processed sessions should skip the renderer Z-blur."""
+    assert z_blur_sigma_for_session("0a288534_deabe") == 0.0
+    assert z_blur_sigma_for_session("anything_deabe") == 0.0

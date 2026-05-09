@@ -21,7 +21,7 @@ from ..preview_cache import (
     read_sidecar,
     write_sidecar,
 )
-from ..volume_io import load_volume, normalize_for_3d, preprocess
+from ..volume_io import load_volume, normalize_for_3d, preprocess, z_blur_sigma_for_session
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -72,7 +72,7 @@ async def get_volume_raw(
             try:
                 vol = load_volume(path)
                 vol = preprocess(vol)
-                vol_uint8 = normalize_for_3d(vol)
+                vol_uint8 = normalize_for_3d(vol, z_blur_sigma=z_blur_sigma_for_session(session))
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc))
             except Exception as exc:

@@ -125,9 +125,22 @@ def _signal_percentile(
 
 
 def normalize_for_3d(vol: np.ndarray, z_blur_sigma: float = 1.0) -> np.ndarray:
-    """Percentile-stretch + Z-axis Gaussian blur + uint8 quantize."""
+    """Percentile-stretch + Z-axis Gaussian blur + uint8 quantize.
+
+    The Z-blur was added to hide diSPIM Z-banding in the raw view. Pass
+    `z_blur_sigma=0` for sessions whose volumes are already de-banded
+    (e.g. DeAbe-processed) — see `z_blur_sigma_for_session`.
+    """
     vol = vol.astype(np.float32)
     p1, p99 = _signal_percentile(vol, (1.0, 99.0))
     vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
-    vol = ndimage.gaussian_filter1d(vol, sigma=z_blur_sigma, axis=0)
+    if z_blur_sigma > 0:
+        vol = ndimage.gaussian_filter1d(vol, sigma=z_blur_sigma, axis=0)
     return (vol * 255).astype(np.uint8)
+
+
+def z_blur_sigma_for_session(session: str) -> float:
+    """Sessions whose names end with `_deabe` skip the renderer Z-blur — DeAbe
+    already removed the Z-banding artifact the blur was hiding, and the blur
+    smooths over the deconvolution improvement that was the whole point."""
+    return 0.0 if session.endswith("_deabe") else 1.0
