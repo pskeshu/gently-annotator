@@ -14,6 +14,16 @@ datasets:
     roots:
       - D:\Kesavan\latest\Kesavan\Gently2
       - \\nearline.hhmi.org\shroff\shrofflab\Collaborators\Kesavan\Gently2
+  GentlyHF:
+    # HuggingFace benchmark release `pskeshu/gently-perception-benchmark`.
+    # Layout: volumes/embryo_N/embryo_N_TIMESTAMP.tif + annotations.json.
+    # Ships pre-cropped to view A (X=1024), so preprocess skips the
+    # half-split (view: none).
+    schema: huggingface
+    roots:
+      - D:\huggingface\dataset_cropped\data
+    preprocess:
+      view: none
 
 stages:
   - early

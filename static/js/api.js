@@ -210,6 +210,27 @@ const API = {
     if (!r.ok) throw new Error(`deleteViewNote: ${r.status}`);
     return r.json();
   },
+
+  // ---- events: twitching_start (HF datasets only) ----
+
+  async upsertTwitching(dataset, session, embryo, { annotator, timepoint }) {
+    const r = await fetch(`${this._annPath(dataset, session, embryo)}/twitching`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ annotator, timepoint }),
+    });
+    if (!r.ok) throw new Error(`upsertTwitching: ${r.status}`);
+    return r.json();
+  },
+
+  async deleteTwitching(dataset, session, embryo, annotator) {
+    const r = await fetch(
+      `${this._annPath(dataset, session, embryo)}/twitching?annotator=${encodeURIComponent(annotator)}`,
+      { method: "DELETE" }
+    );
+    if (!r.ok) throw new Error(`deleteTwitching: ${r.status}`);
+    return r.json();
+  },
 };
 
 window.API = API;

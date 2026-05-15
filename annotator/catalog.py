@@ -4,6 +4,11 @@ Schemas supported:
 
   v1 (Gently):  {root}/images/{session}/embryo_N_tNNNN[_YYYYMMDD_HHMMSS].tif
   v2 (Gently2): {root}/volumes/{session}/embryo_N_tNNNN.tif
+  huggingface:  {root}/volumes/embryo_N/embryo_N_YYYYMMDD_HHMMSS.tif
+                + {root}/volumes/embryo_N/annotations.json (session id
+                lives inside the JSON; there's no per-session subdir).
+                Timepoints have no `tNNNN` in the filename — index is
+                derived from chronological-sorted order, 0..N-1.
 
 Each dataset has an ordered list of candidate roots; the first one that
 exists wins. So a local D: copy transparently takes precedence over a
@@ -17,6 +22,7 @@ Discovery is lazy:
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
@@ -32,11 +38,25 @@ TIF_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+# HF schema: no t-number, just embryo + capture timestamp. We index by
+# sorted filename — which is chronological because YYYYMMDD_HHMMSS is
+# monotonic — so missing the t-number is harmless.
+TIF_PATTERN_HF = re.compile(
+    r"^embryo_(\d+)_(\d{8}_\d{6})\.tif$",
+    re.IGNORECASE,
+)
+
 # Schema → name of the directory under the dataset root that holds session subdirs.
 _SESSIONS_SUBDIR = {
     "v1": "images",
     "v2": "volumes",
+    "huggingface": "volumes",
 }
+
+# Schemas that don't have a per-session subdirectory level — embryos sit
+# directly under {root}/{subdir}/, and the session id is read from the
+# embryo's sidecar annotations.json.
+_FLAT_EMBRYO_SCHEMAS = {"huggingface"}
 
 
 @dataclass(frozen=True)
@@ -124,13 +144,38 @@ class Catalog:
         return list(self.datasets.values())
 
     def list_sessions(self, dataset: str) -> list[str]:
-        """Just session-dir names. Cheap; doesn't walk into them."""
+        """Session ids for the dataset.
+
+        v1/v2: cheap iterdir of {root}/{images|volumes}/. Each subdir is
+        already a session id.
+
+        huggingface: there's no session subdir level — embryo dirs sit
+        flat under {root}/volumes/. We peek into each embryo's
+        annotations.json and return the distinct `session_id` values. If
+        no annotations.json exists for an embryo it's still surfaced
+        under a synthetic "unsessioned" bucket so the user can find it.
+        """
         if dataset not in self.datasets:
             raise KeyError(dataset)
+        ds = self.datasets[dataset]
+        if ds.schema in _FLAT_EMBRYO_SCHEMAS:
+            return self._list_sessions_hf(dataset)
         sessions_dir = self._sessions_dir(dataset)
         if sessions_dir is None or not sessions_dir.exists():
             return []
         return sorted(p.name for p in sessions_dir.iterdir() if p.is_dir())
+
+    def _list_sessions_hf(self, dataset: str) -> list[str]:
+        sessions_dir = self._sessions_dir(dataset)
+        if sessions_dir is None or not sessions_dir.exists():
+            return []
+        sids: set[str] = set()
+        for entry in sessions_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            sid = _read_session_id(entry / "annotations.json") or "unsessioned"
+            sids.add(sid)
+        return sorted(sids)
 
     def list_session_summaries(self, dataset: str) -> list[SessionSummary]:
         """One row per session with embryo/timepoint counts.
@@ -175,6 +220,18 @@ class Catalog:
         if key in self._session_cache:
             return self._session_cache[key]
 
+        ds = self.datasets.get(dataset)
+        if ds is None:
+            return None
+        if ds.schema in _FLAT_EMBRYO_SCHEMAS:
+            meta = self._get_session_hf(dataset, session)
+        else:
+            meta = self._get_session_standard(dataset, session)
+        if meta is not None:
+            self._session_cache[key] = meta
+        return meta
+
+    def _get_session_standard(self, dataset: str, session: str) -> SessionMeta | None:
         sessions_dir = self._sessions_dir(dataset)
         if sessions_dir is None:
             return None
@@ -198,10 +255,56 @@ class Catalog:
 
         for emb in embryos.values():
             emb.timepoints.sort(key=lambda t: t.timepoint)
+        return SessionMeta(session_id=session, embryos=embryos)
 
-        meta = SessionMeta(session_id=session, embryos=embryos)
-        self._session_cache[key] = meta
-        return meta
+    def _get_session_hf(self, dataset: str, session: str) -> SessionMeta | None:
+        """HF schema: collect every embryo dir whose annotations.json
+        session_id matches. Within each, sort TIFs by filename
+        (chronological) and index 0..N-1.
+        """
+        sessions_dir = self._sessions_dir(dataset)
+        if sessions_dir is None or not sessions_dir.exists():
+            return None
+
+        embryos: dict[str, EmbryoMeta] = {}
+        for entry in sessions_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            sid = _read_session_id(entry / "annotations.json") or "unsessioned"
+            if sid != session:
+                continue
+            tif_files = sorted(
+                p for p in entry.iterdir()
+                if p.is_file() and TIF_PATTERN_HF.match(p.name)
+            )
+            if not tif_files:
+                continue
+            # The directory name IS the embryo id (e.g. "embryo_1"). The
+            # filename also encodes the embryo number; if they disagree
+            # we trust the directory.
+            embryo_id = entry.name
+            em = EmbryoMeta(embryo_id=embryo_id)
+            for idx, p in enumerate(tif_files):
+                em.timepoints.append(Timepoint(timepoint=idx, path=p))
+            embryos[embryo_id] = em
+
+        if not embryos:
+            return None
+        return SessionMeta(session_id=session, embryos=embryos)
+
+    def sidecar_path(self, dataset: str, embryo: str) -> Path | None:
+        """Return the annotations.json path for an HF embryo, else None.
+
+        Only HF-schema datasets have a per-embryo sidecar. Returns None
+        for v1/v2 (which use the SQLite store exclusively).
+        """
+        ds = self.datasets.get(dataset)
+        if ds is None or ds.schema not in _FLAT_EMBRYO_SCHEMAS:
+            return None
+        sessions_dir = self._sessions_dir(dataset)
+        if sessions_dir is None:
+            return None
+        return sessions_dir / embryo / "annotations.json"
 
     def get_timepoint_path(
         self, dataset: str, session: str, embryo: str, timepoint: int
@@ -221,3 +324,19 @@ class Catalog:
         """Drop the per-session and per-dataset caches (use after the disk layout changes)."""
         self._session_cache.clear()
         self._summary_cache.clear()
+
+
+def _read_session_id(path: Path) -> str | None:
+    """Read `session_id` from an HF-schema annotations.json sidecar.
+
+    Returns None for missing/unreadable/malformed JSONs — callers fall
+    back to a synthetic "unsessioned" bucket so the embryo is still
+    visible in the catalog.
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    sid = data.get("session_id")
+    return sid if isinstance(sid, str) and sid else None

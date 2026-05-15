@@ -51,6 +51,14 @@
       unreliableRanges: [],
       // [{id, timepoint, view_params, note, tag, ...}, ...]
       viewNotes: [],
+      // Ground-truth overlay (HF datasets). Read-only — shown as a
+      // distinct band in the timeline so the active annotator can compare
+      // their own stage marks against the published labels.
+      groundTruth: { transitions: [], annotator: null, source: null },
+      // Twitching event from the per-embryo annotations.json. `mine` is
+      // {timepoint, updated_at} for the active annotator; `others` is the
+      // rest, surfaced for context but not editable.
+      twitching: { mine: null, others: [] },
     },
     unreliableMarking: null,    // {startTp, startedAt} when user is mid-range
     // Summary across ALL of the current annotator's work — drives sidebar
@@ -348,6 +356,10 @@
       if (state.viewer) state.viewer.setAxesVisible(e.target.checked);
     });
 
+    // Events row (HF datasets only).
+    document.getElementById("twitch-toggle")?.addEventListener("click", () => toggleTwitching());
+    document.getElementById("twitch-clear")?.addEventListener("click", () => clearTwitching());
+
     // Timeline strip click → jump to that timepoint.
     document.getElementById("timeline-strip").addEventListener("click", (e) => {
       if (!state.timepoints.length) return;
@@ -403,6 +415,9 @@
       }
       if (e.key === "r" || e.key === "R") {
         alignToSavedOrientation(); e.preventDefault(); return;
+      }
+      if (e.key === "t" || e.key === "T") {
+        toggleTwitching(); e.preventDefault(); return;
       }
       if (e.key === "Escape" && state.unreliableMarking) {
         state.unreliableMarking = null;
@@ -703,6 +718,8 @@
       orientations: new Map(),
       unreliableRanges: [],
       viewNotes: [],
+      groundTruth: { transitions: [], annotator: null, source: null },
+      twitching: { mine: null, others: [] },
     };
     state.unreliableMarking = null;
     renderCatalog();
@@ -799,6 +816,17 @@
       );
       state.annotations.unreliableRanges = data.unreliable_ranges || [];
       state.annotations.viewNotes = data.view_notes || [];
+      const gt = data.ground_truth || {};
+      state.annotations.groundTruth = {
+        transitions: gt.transitions || [],
+        annotator: gt.annotator || null,
+        source: gt.source || null,
+      };
+      const ev = (data.events && data.events.twitching_start) || {};
+      state.annotations.twitching = {
+        mine: ev.mine || null,
+        others: ev.others || [],
+      };
       state.annotations.loaded = true;
     } catch (err) {
       console.error("loadAnnotations failed:", err);
@@ -992,6 +1020,59 @@
     const t = state.annotations.transitions.find((x) => x.timepoint === tp);
     if (!t) return;
     await clearStageMarker(t.stage);
+  }
+
+  // ---- annotations: twitching event (HF datasets only) ----
+
+  /** True when the loaded embryo has a per-embryo annotations.json
+   *  sidecar — i.e., it's the HuggingFace benchmark dataset. */
+  function hasSidecar() {
+    return state.annotations.groundTruth.source === "annotations.json";
+  }
+
+  /** Toggle the active annotator's twitching_start mark at the current
+   *  timepoint. Re-clicking on the same tp clears the mark. */
+  async function toggleTwitching() {
+    if (isViewOnly()) return readOnlyToast();
+    if (!requireAnnotatorOrPrompt()) return;
+    if (!state.selected.embryo) return;
+    if (!hasSidecar()) {
+      setStatus("Twitching events are only supported on the HuggingFace dataset.", true);
+      return;
+    }
+    const tp = state.selected.timepoint;
+    if (tp == null) return;
+    const { dataset, session, embryo } = state.selected;
+    const mine = state.annotations.twitching.mine;
+    try {
+      if (mine && mine.timepoint === tp) {
+        await API.deleteTwitching(dataset, session, embryo, state.annotator);
+        state.annotations.twitching.mine = null;
+      } else {
+        await API.upsertTwitching(dataset, session, embryo, {
+          annotator: state.annotator, timepoint: tp,
+        });
+        state.annotations.twitching.mine = { annotator: state.annotator, timepoint: tp };
+      }
+      renderAnnotationUI();
+    } catch (err) {
+      setStatus(`Twitching save failed: ${err.message}`, true);
+    }
+  }
+
+  async function clearTwitching() {
+    if (isViewOnly()) return readOnlyToast();
+    if (!requireAnnotatorOrPrompt()) return;
+    if (!state.selected.embryo) return;
+    if (!hasSidecar()) return;
+    const { dataset, session, embryo } = state.selected;
+    try {
+      await API.deleteTwitching(dataset, session, embryo, state.annotator);
+      state.annotations.twitching.mine = null;
+      renderAnnotationUI();
+    } catch (err) {
+      setStatus(`Twitching clear failed: ${err.message}`, true);
+    }
   }
 
   // ---- annotations: notes ----
@@ -1225,8 +1306,42 @@
     renderNoteForCurrentTp();
     renderExcludeUI();
     renderOrientationUI();
+    renderEventsUI();
     renderViewNotes();
     updateAnnotTpLabel();
+  }
+
+  function renderEventsUI() {
+    const row = document.getElementById("events-row");
+    if (!row) return;
+    // The events row is HF-only — hide on Gently/Gently2.
+    const show = hasSidecar();
+    row.hidden = !show;
+    if (!show) return;
+
+    const btn = document.getElementById("twitch-toggle");
+    const label = document.getElementById("twitch-toggle-label");
+    const clearBtn = document.getElementById("twitch-clear");
+    const stateEl = document.getElementById("twitch-state");
+    const tp = state.selected.timepoint;
+    const enabled = state.annotations.loaded && tp != null && !isViewOnly();
+    btn.disabled = !enabled;
+    const mine = state.annotations.twitching.mine;
+    const isAtCurrent = mine && mine.timepoint === tp;
+    btn.classList.toggle("has-ap", !!isAtCurrent);  // reuse green styling
+    label.textContent = isAtCurrent
+      ? `Twitching starts here (t=${tp}) — click again to clear`
+      : (mine ? `Move twitching start to t=${tp}` : "Mark twitching start");
+
+    clearBtn.hidden = !mine;
+    clearBtn.disabled = !mine || isViewOnly();
+
+    const parts = [];
+    if (mine) parts.push(`<span class="ap">you: twitching @ t=${mine.timepoint}</span>`);
+    for (const o of state.annotations.twitching.others || []) {
+      parts.push(`<span class="dv">${escapeHtml(o.annotator)}: t=${o.timepoint}</span>`);
+    }
+    stateEl.innerHTML = parts.join(" · ");
   }
 
   function renderOrientationUI() {
@@ -1548,6 +1663,7 @@
   function renderTimeline() {
     const strip = document.getElementById("timeline-strip");
     const bands = document.getElementById("timeline-bands");
+    const gtLayer = document.getElementById("timeline-gt");
     const ticks = document.getElementById("timeline-ticks");
     const markers = document.getElementById("timeline-markers");
     const cursor = document.getElementById("timeline-cursor");
@@ -1557,6 +1673,7 @@
     strip.classList.toggle("disabled", !enabled);
     if (!enabled) {
       bands.innerHTML = ""; markers.innerHTML = "";
+      if (gtLayer) gtLayer.innerHTML = "";
       if (ticks) ticks.innerHTML = "";
       cursor.style.display = "none";
       renderTimelineNotes();
@@ -1567,6 +1684,51 @@
     const N = tps.length;
     const xFor = (idx) => (N <= 1 ? 0 : (idx / (N - 1)) * 100);
     const widthFor = (idxStart, idxEnd) => xFor(idxEnd) - xFor(idxStart);
+
+    // Ground-truth band (HF dataset only) — same band-from-transitions
+    // walk as the user's stages, but driven by groundTruth.transitions
+    // and styled as a thin reference strip.
+    if (gtLayer) gtLayer.innerHTML = "";
+    const gtTransitions = state.annotations.groundTruth.transitions || [];
+    if (gtLayer && gtTransitions.length) {
+      const stageAtGT = (tp) => {
+        let best = null;
+        for (const t of gtTransitions) {
+          if (t.timepoint <= tp && (!best || t.timepoint > best.timepoint)) best = t;
+        }
+        return best ? best.stage : null;
+      };
+      let runStart = 0;
+      let runStage = stageAtGT(tps[0]);
+      for (let i = 1; i <= N; i++) {
+        const cur = i < N ? stageAtGT(tps[i]) : null;
+        if (i === N || cur !== runStage) {
+          if (runStage) {
+            const band = document.createElement("div");
+            band.className = "tl-gt-band";
+            band.style.left = xFor(runStart) + "%";
+            band.style.width = widthFor(runStart, i - 1) + "%";
+            band.style.background = STAGE_COLORS[runStage] || "#888";
+            const gtAnnotator = state.annotations.groundTruth.annotator || "GT";
+            band.title = `${gtAnnotator} (ground truth) — ${runStage}: t=${tps[runStart]} … t=${tps[i - 1]}`;
+            gtLayer.appendChild(band);
+          }
+          runStart = i;
+          runStage = cur;
+        }
+      }
+      // Small marker triangles for each ground-truth transition.
+      for (const t of gtTransitions) {
+        const idx = tps.indexOf(t.timepoint);
+        if (idx < 0) continue;
+        const m = document.createElement("div");
+        m.className = "tl-gt-marker";
+        m.style.left = xFor(idx) + "%";
+        m.style.setProperty("--marker-color", STAGE_COLORS[t.stage] || "#fff");
+        m.title = `GT: ${t.stage} starts at t=${t.timepoint}`;
+        gtLayer.appendChild(m);
+      }
+    }
 
     // Build stage bands by walking timepoints and grouping by interpolated stage.
     bands.innerHTML = "";
@@ -1599,6 +1761,34 @@
       m.style.left = xFor(idx) + "%";
       m.style.setProperty("--marker-color", STAGE_COLORS[t.stage] || "#fff");
       m.title = `${t.stage} starts at t=${t.timepoint}`;
+      markers.appendChild(m);
+    }
+
+    // Twitching event markers — distinct vertical bar. `mine` is bright;
+    // `others` are dimmer so they don't compete with the active user's mark.
+    const tw = state.annotations.twitching;
+    if (tw && tw.mine) {
+      const idx = tps.indexOf(tw.mine.timepoint);
+      if (idx >= 0) {
+        const m = document.createElement("div");
+        m.className = "tl-twitch";
+        m.style.left = xFor(idx) + "%";
+        m.title = `twitching start (you) at t=${tw.mine.timepoint}`;
+        markers.appendChild(m);
+        const g = document.createElement("div");
+        g.className = "tl-twitch-glyph";
+        g.style.left = xFor(idx) + "%";
+        g.textContent = "T";
+        markers.appendChild(g);
+      }
+    }
+    for (const o of (tw && tw.others) || []) {
+      const idx = tps.indexOf(o.timepoint);
+      if (idx < 0) continue;
+      const m = document.createElement("div");
+      m.className = "tl-twitch others";
+      m.style.left = xFor(idx) + "%";
+      m.title = `twitching start (${o.annotator}) at t=${o.timepoint}`;
       markers.appendChild(m);
     }
 

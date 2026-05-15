@@ -840,6 +840,7 @@ body.view-only #viewer-controls {
 }
 
 #timeline-bands,
+#timeline-gt,
 #timeline-ticks,
 #timeline-markers,
 #timeline-notes {
@@ -849,12 +850,63 @@ body.view-only #viewer-controls {
 }
 
 /* Stage colored band — sits in the middle of the strip with room above for
-   transition triangles and below for the tick axis + note dots. */
+   transition triangles + the ground-truth strip and below for the tick
+   axis + note dots. */
 .tl-band {
   position: absolute;
-  top: 18px;
+  top: 26px;
   bottom: 28px;
   opacity: 0.85;
+}
+
+/* Ground-truth band — thin strip just above the user's band, lower
+   opacity + dashed bottom so it reads as "reference layer" rather than
+   "your work". Color matches the same stage palette. */
+.tl-gt-band {
+  position: absolute;
+  top: 18px;
+  height: 6px;
+  opacity: 0.55;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.55);
+}
+
+.tl-gt-marker {
+  position: absolute;
+  top: 16px;
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-bottom: 6px solid var(--marker-color, #888);
+  opacity: 0.85;
+  transform: translateX(-4px);
+}
+
+/* Twitching event marker — vertical bar spanning the full strip with a
+   distinct color so it's never confused with stage transitions. */
+.tl-twitch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  margin-left: -1px;
+  background: #bd66ff;
+  box-shadow: 0 0 4px rgba(189, 102, 255, 0.7);
+  pointer-events: auto;
+}
+.tl-twitch.others {
+  width: 2px;
+  background: rgba(189, 102, 255, 0.45);
+  box-shadow: none;
+}
+.tl-twitch-glyph {
+  position: absolute;
+  top: -1px;
+  font-size: 11px;
+  line-height: 11px;
+  color: #fff;
+  text-shadow: 0 0 2px #000;
+  transform: translateX(-50%);
 }
 
 .tl-marker {

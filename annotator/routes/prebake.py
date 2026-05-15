@@ -10,6 +10,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from ..volume_io import DEFAULT_BG_OFFSET, DEFAULT_VIEW
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/prebake")
 
@@ -30,8 +32,20 @@ async def start(body: StartBody, request: Request):
     tp_to_path = {tp.timepoint: tp.path for tp in em.timepoints}
     if not tp_to_path:
         raise HTTPException(status_code=400, detail="Embryo has no timepoints")
+
+    cfg = request.app.state.config
+    ds_cfg = cfg.get("datasets", {}).get(body.dataset, {}) or {}
+    pp = ds_cfg.get("preprocess", {}) or {}
+    view = pp.get("view", DEFAULT_VIEW)
+    bg_offset = int(pp.get("bg_offset", DEFAULT_BG_OFFSET))
+
     status = request.app.state.prebake.start(
-        body.dataset, body.session, body.embryo, tp_to_path
+        body.dataset,
+        body.session,
+        body.embryo,
+        tp_to_path,
+        view=view,
+        bg_offset=bg_offset,
     )
     return status
 

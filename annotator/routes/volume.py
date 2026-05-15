@@ -21,7 +21,28 @@ from ..preview_cache import (
     read_sidecar,
     write_sidecar,
 )
-from ..volume_io import load_volume, normalize_for_3d, preprocess, z_blur_sigma_for_session
+from ..volume_io import (
+    DEFAULT_BG_OFFSET,
+    DEFAULT_VIEW,
+    load_volume,
+    normalize_for_3d,
+    preprocess,
+    z_blur_sigma_for_session,
+)
+
+
+def _dataset_preprocess(cfg: dict, dataset: str) -> dict:
+    """Per-dataset preprocess options (view crop, bg offset).
+
+    Looked up in cfg["datasets"][dataset]["preprocess"]; falls back to
+    the global volume_io defaults (left view, bg=100).
+    """
+    ds_cfg = cfg.get("datasets", {}).get(dataset, {}) or {}
+    pp = ds_cfg.get("preprocess", {}) or {}
+    return {
+        "view": pp.get("view", DEFAULT_VIEW),
+        "bg_offset": int(pp.get("bg_offset", DEFAULT_BG_OFFSET)),
+    }
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
@@ -71,8 +92,11 @@ async def get_volume_raw(
         if cached is None:
             try:
                 vol = load_volume(path)
-                vol = preprocess(vol)
-                vol_uint8 = normalize_for_3d(vol, z_blur_sigma=z_blur_sigma_for_session(session))
+                pp = _dataset_preprocess(cfg, dataset)
+                vol = preprocess(vol, view=pp["view"], bg_offset=pp["bg_offset"])
+                vol_uint8 = normalize_for_3d(
+                    vol, z_blur_sigma=z_blur_sigma_for_session(session),
+                )
             except FileNotFoundError as exc:
                 raise HTTPException(status_code=404, detail=str(exc))
             except Exception as exc:

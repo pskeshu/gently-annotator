@@ -20,6 +20,8 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from .. import json_sidecar
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/annotations")
 
@@ -104,6 +106,11 @@ class ViewNotePatchBody(BaseModel):
     view_params: Optional[dict] = None
 
 
+class TwitchingBody(BaseModel):
+    annotator: str
+    timepoint: int
+
+
 # ---- routes ----
 
 @router.get("/{dataset}/{session}/{embryo}")
@@ -114,7 +121,14 @@ async def get_bundle(
     request: Request,
     annotator: Optional[str] = None,
 ):
-    """Return all of one annotator's labels for an embryo in a single payload."""
+    """Return all of one annotator's labels for an embryo in a single payload.
+
+    For HF-schema datasets the payload also includes:
+    - `ground_truth.transitions` — the JSON sidecar's `stage_transitions`,
+      surfaced as a read-only overlay (rendered distinctly in the timeline).
+    - `events.twitching_start` — the active annotator's twitching mark
+      from the JSON, plus everyone else's twitching marks for context.
+    """
     catalog = request.app.state.catalog
     store = request.app.state.store
     _check_path(catalog, dataset, session, embryo)
@@ -126,6 +140,26 @@ async def get_bundle(
     orientations = store.list_orientations(dataset, session, embryo, name)
     unreliable = store.list_unreliable_ranges(dataset, session, embryo, name)
     view_notes = store.list_view_notes(dataset, session, embryo, name)
+
+    ground_truth: dict = {"transitions": []}
+    events: dict = {"twitching_start": {"mine": None, "others": []}}
+    sidecar = catalog.sidecar_path(dataset, embryo)
+    if sidecar is not None:
+        data = json_sidecar.read_sidecar(sidecar)
+        if data:
+            ground_truth = {
+                "transitions": json_sidecar.ground_truth_transitions(data),
+                "source": "annotations.json",
+                "annotator": data.get("annotator"),
+                "annotation_date": data.get("annotation_date"),
+            }
+            mine = json_sidecar.twitching_event(data, name)
+            others = [
+                e for e in json_sidecar.all_twitching_events(data)
+                if e["annotator"] != name
+            ]
+            events = {"twitching_start": {"mine": mine, "others": others}}
+
     return {
         "dataset": dataset,
         "session": session,
@@ -138,6 +172,8 @@ async def get_bundle(
         "orientations": orientations,
         "unreliable_ranges": unreliable,
         "view_notes": view_notes,
+        "ground_truth": ground_truth,
+        "events": events,
     }
 
 
@@ -350,4 +386,52 @@ async def delete_view_note(
     _check_path(catalog, dataset, session, embryo)
     name = _require_annotator(annotator)
     store.delete_view_note(note_id, name)
+    return {"ok": True}
+
+
+# ---- events: twitching_start ----
+# Only meaningful on HF datasets — those are the ones with a per-embryo
+# annotations.json. The event is stored back into that JSON, namespaced
+# per-annotator, so Ryan's stage_transitions stay untouched.
+
+
+def _require_sidecar(catalog, dataset: str, embryo: str):
+    sidecar = catalog.sidecar_path(dataset, embryo)
+    if sidecar is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Twitching events are only supported on HF-schema datasets",
+        )
+    return sidecar
+
+
+@router.post("/{dataset}/{session}/{embryo}/twitching")
+async def upsert_twitching(
+    dataset: str,
+    session: str,
+    embryo: str,
+    body: TwitchingBody,
+    request: Request,
+):
+    catalog = request.app.state.catalog
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(body.annotator)
+    sidecar = _require_sidecar(catalog, dataset, embryo)
+    json_sidecar.upsert_twitching(sidecar, name, body.timepoint)
+    return {"ok": True}
+
+
+@router.delete("/{dataset}/{session}/{embryo}/twitching")
+async def delete_twitching(
+    dataset: str,
+    session: str,
+    embryo: str,
+    request: Request,
+    annotator: Optional[str] = None,
+):
+    catalog = request.app.state.catalog
+    _check_path(catalog, dataset, session, embryo)
+    name = _require_annotator(annotator)
+    sidecar = _require_sidecar(catalog, dataset, embryo)
+    json_sidecar.delete_twitching(sidecar, name)
     return {"ok": True}

@@ -103,8 +103,23 @@
           </label>
         </div>
 
+        <div class="annotation-row" id="events-row" hidden>
+          <span class="annotation-label">Events:</span>
+          <button id="twitch-toggle" class="orient-btn" type="button"
+                  title="Mark this timepoint as the start of twitching (t to toggle)">
+            <span class="orient-key">T</span> <span id="twitch-toggle-label">Mark twitching start</span>
+          </button>
+          <button id="twitch-clear" class="orient-btn" type="button" hidden
+                  title="Clear my twitching_start mark">
+            Clear
+          </button>
+          <span class="annotation-spacer"></span>
+          <span id="twitch-state" class="orient-state"></span>
+        </div>
+
         <div id="timeline-strip">
           <div id="timeline-bands"></div>
+          <div id="timeline-gt"></div>
           <div id="timeline-ticks"></div>
           <div id="timeline-markers"></div>
           <div id="timeline-notes"></div>

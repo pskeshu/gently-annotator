@@ -67,21 +67,30 @@ def preprocess(
     subtracts `bg_offset` with negative-clip. Result is non-negative
     in the same dtype family as the input (cast up to int32 if needed
     so uint16 inputs don't underflow).
+
+    Pass view="none" for volumes that are already a single view (e.g.
+    the HuggingFace `pskeshu/gently-perception-benchmark` release, which
+    is published pre-cropped at X=1024). In that mode we skip the
+    half-split and only do the bg_offset subtract.
     """
     if vol.ndim != 3:
         raise ValueError(f"Expected 3D volume, got shape {vol.shape}")
 
-    x = vol.shape[2]
-    if x % 2 != 0:
-        raise ValueError(f"X dimension {x} is odd; cannot split into two views")
-    half = x // 2
-
-    if view == "left":
-        view_vol = vol[:, :, :half]
-    elif view == "right":
-        view_vol = vol[:, :, half:]
+    if view == "none":
+        view_vol = vol
     else:
-        raise ValueError(f"view must be 'left' or 'right', got {view!r}")
+        x = vol.shape[2]
+        if x % 2 != 0:
+            raise ValueError(f"X dimension {x} is odd; cannot split into two views")
+        half = x // 2
+        if view == "left":
+            view_vol = vol[:, :, :half]
+        elif view == "right":
+            view_vol = vol[:, :, half:]
+        else:
+            raise ValueError(
+                f"view must be 'left', 'right', or 'none', got {view!r}"
+            )
 
     # Promote to int32 so uint16 inputs don't wrap when subtracting.
     out = view_vol.astype(np.int32, copy=False) - int(bg_offset)

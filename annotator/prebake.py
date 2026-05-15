@@ -28,6 +28,8 @@ def _bake_one(
     tif_path: str,
     cache_path: str,
     voxel_size_um: list[float],
+    view: str,
+    bg_offset: int,
     z_blur_sigma: float = 1.0,
 ) -> str:
     """Worker entry point — pickled and sent to a child process.
@@ -45,7 +47,7 @@ def _bake_one(
         return str(cp)
 
     vol = load_volume(_Path(tif_path))
-    vol = preprocess(vol)
+    vol = preprocess(vol, view=view, bg_offset=bg_offset)
     vol_uint8 = normalize_for_3d(vol, z_blur_sigma=z_blur_sigma)
     write_sidecar(cp, vol_uint8, voxel_size_um)
     return str(cp)
@@ -80,8 +82,15 @@ class PreBakeManager:
         session: str,
         embryo: str,
         timepoint_to_path: dict[int, Path],
+        view: str = "left",
+        bg_offset: int = 100,
     ) -> dict:
-        """Cancel any existing job, then submit one bake task per missing sidecar."""
+        """Cancel any existing job, then submit one bake task per missing sidecar.
+
+        view / bg_offset come from the per-dataset preprocess config — same
+        values used by the live volume route, so prebaked sidecars match
+        what an on-demand fetch would produce.
+        """
         with self._lock:
             new_key = (dataset, session, embryo)
             self._cancel_locked()
@@ -108,7 +117,13 @@ class PreBakeManager:
 
             for tif_path, cache_path in jobs:
                 f = self._executor.submit(
-                    _bake_one, tif_path, cache_path, self.voxel_size_um, sigma
+                    _bake_one,
+                    tif_path,
+                    cache_path,
+                    self.voxel_size_um,
+                    view,
+                    bg_offset,
+                    sigma,
                 )
                 f.add_done_callback(self._on_done)
                 self._futures.append(f)
